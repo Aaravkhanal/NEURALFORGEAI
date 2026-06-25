@@ -90,13 +90,18 @@ def _get_model_path(model_id: str) -> str | None:
 
 def _update_job_db(job_id: str, updates: dict):
     """Update training job record in the database synchronously."""
-    # Use synchronous SQLAlchemy for Celery worker context
     try:
-        from sqlalchemy import create_engine, text
+        from sqlalchemy import create_engine, event, text
         db_url = os.getenv("DATABASE_URL", "sqlite:///./neuralforge.db")
-        # Convert async URL to sync for celery workers
         sync_url = db_url.replace("sqlite+aiosqlite", "sqlite").replace("postgresql+asyncpg", "postgresql")
         engine = create_engine(sync_url)
+
+        if "sqlite" in sync_url:
+            @event.listens_for(engine, "connect")
+            def _wal(conn, _):
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
+
         set_clauses = ", ".join([f"{k} = :{k}" for k in updates.keys()])
         with engine.connect() as conn:
             conn.execute(
@@ -119,6 +124,7 @@ def _save_model_record_with_features(
     job_id: str, model_path: str, model_format: str, metrics: dict,
     training_params: dict, feature_names: list = None,
     feature_types: dict = None, training_data_path: str = "",
+    train_metrics: dict = None,
 ):
     """Create a TrainedModel record with feature names and types for dynamic testing UI."""
     import uuid
@@ -149,12 +155,12 @@ def _save_model_record_with_features(
                 text("""
                     INSERT INTO trained_models
                     (id, training_job_id, project_id, user_id, model_name, task_type,
-                     model_path, model_format, model_size, metrics, export_formats,
+                     model_path, model_format, model_size, metrics, train_metrics, export_formats,
                      version, is_best, dataset_info, training_params,
                      feature_names, feature_types, created_at)
                     VALUES
                     (:id, :training_job_id, :project_id, :user_id, :model_name, :task_type,
-                     :model_path, :model_format, :model_size, :metrics, :export_formats,
+                     :model_path, :model_format, :model_size, :metrics, :train_metrics, :export_formats,
                       1, 1, :dataset_info, :training_params,
                      :feature_names, :feature_types, :created_at)
                 """),
@@ -169,6 +175,7 @@ def _save_model_record_with_features(
                     "model_format": model_format,
                     "model_size": model_size,
                     "metrics": json.dumps(metrics),
+                    "train_metrics": json.dumps(train_metrics or {}),
                     "export_formats": json.dumps({model_format: model_path}),
                     "dataset_info": json.dumps(dataset_info),
                     "training_params": json.dumps(training_params),
@@ -181,6 +188,160 @@ def _save_model_record_with_features(
         engine.dispose()
     except Exception as e:
         logger.error(f"Failed to save model record: {e}")
+
+
+def _tokenize_col(name: str) -> list:
+    """Split camelCase, snake_case, and space-separated column names into words."""
+    import re
+    # Insert underscore before uppercase runs in camelCase
+    s = re.sub(r'([a-z])([A-Z])', r'\1_\2', name)
+    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', s)
+    return [w.lower() for w in re.split(r'[_\s\-]+', s) if w]
+
+
+def _auto_drop_columns(df, target_column: str) -> list:
+    """
+    Conservative heuristic drop — intentionally under-drops so the LLM pass
+    (which runs immediately after) can make domain-aware decisions.
+
+    Only drops columns that are UNAMBIGUOUSLY tracking/identifier columns:
+      BatteryID, BatchID, batch_no, lot_code, row_uuid … but NOT CycleNumber,
+      SampleRate, RunTime, or any legitimate measurement feature.
+
+    Three rules:
+      1. Pure identifier name  (the whole column name IS an id-word)
+      2. STRONG suffix + high cardinality  (ends with id/uuid/serial/barcode)
+      3. Batch/lot prefix  (BatchID, LotCode, BatchNo)
+      4. Name-based leakage (substring / word overlap with target)
+      5. Statistical leakage (|r| > 0.98 with target)
+    """
+    to_drop = set()
+    all_cols = [c for c in df.columns if c != target_column]
+    target_words = set(_tokenize_col(target_column))
+
+    # Unambiguous ID suffixes — these ALWAYS indicate identifiers when they end a name
+    STRONG_SUFFIX = {'id', 'uuid', 'barcode', 'serial'}
+    # Words that are ONLY ever identifiers when they stand alone
+    PURE_ID_NAMES = {'id', 'uuid', 'barcode', 'serial', 'batchid', 'batch_id'}
+    # Prefixes that mark tracking/grouping columns (only batch & lot — conservative)
+    BATCH_PREFIX  = {'batch', 'lot'}
+
+    for col in all_cols:
+        words = _tokenize_col(col)
+        col_lower = col.lower().replace('_', '').replace('-', '').replace(' ', '')
+
+        # ── 1. Pure identifier name ───────────────────────────────────────
+        if col_lower in PURE_ID_NAMES:
+            to_drop.add(col)
+            continue
+
+        # ── 2. Ends with STRONG suffix + high cardinality ─────────────────
+        if words and words[-1] in STRONG_SUFFIX:
+            unique_ratio = df[col].nunique() / max(len(df), 1)
+            if unique_ratio > 0.4:   # clearly a per-row identifier
+                to_drop.add(col)
+                continue
+
+        # ── 3. Starts with batch/lot (BatchID, LotNo, LotCode, BatchSerial) ─
+        if words and words[0] in BATCH_PREFIX:
+            to_drop.add(col)
+            continue
+
+        # ── 4. Name-based leakage ─────────────────────────────────────────
+        col_words = set(words)
+        col_name_lower = col.lower()
+        tgt_name_lower = target_column.lower()
+        if col_name_lower in tgt_name_lower or tgt_name_lower in col_name_lower:
+            to_drop.add(col)
+            continue
+        # Word-level overlap: soh_derived shares 'soh' with soh_capacity
+        if target_words & col_words and len(target_words) > 1:
+            to_drop.add(col)
+
+    # ── 5. Statistical leakage (Pearson |r| > 0.98) ───────────────────────
+    try:
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        if target_column in numeric_cols and len(numeric_cols) > 1:
+            corr = df[numeric_cols].corr()[target_column].abs()
+            leakage = corr[(corr > 0.98) & (corr.index != target_column)].index.tolist()
+            to_drop.update(leakage)
+    except Exception:
+        pass
+
+    return list(to_drop & set(all_cols))
+
+
+def _llm_feature_selection(df, target_column: str, dropped_so_far: list) -> list:
+    """
+    Use NVIDIA LLM + Tavily to refine feature selection beyond heuristics.
+    Returns additional columns to drop (columns with no domain significance).
+    Non-blocking: any failure returns empty list so training continues.
+    """
+    try:
+        import json
+        import os
+        from services.llm_service import get_best_available_llm
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        remaining_cols = [c for c in df.columns
+                          if c != target_column and c not in dropped_so_far]
+        if not remaining_cols:
+            return []
+
+        col_info = []
+        for col in remaining_cols:
+            info = {"name": col, "dtype": str(df[col].dtype),
+                    "sample": df[col].dropna().head(3).tolist()}
+            if df[col].dtype.kind in ('f', 'i'):
+                info.update({"min": float(df[col].min()), "max": float(df[col].max())})
+            col_info.append(info)
+
+        # Optional: search for domain knowledge
+        web_context = ""
+        try:
+            tavily_key = os.environ.get("TAVILY_API_KEY", "")
+            if tavily_key:
+                from tavily import TavilyClient
+                tc = TavilyClient(api_key=tavily_key)
+                r = tc.search(
+                    query=f"important features for predicting {target_column} machine learning",
+                    search_depth="basic", max_results=3, include_answer=True,
+                )
+                web_context = r.get("answer", "") or ""
+        except Exception:
+            pass
+
+        llm = get_best_available_llm(temperature=0.0)
+        web_section = f"\nDomain knowledge from web:\n{web_context}\n" if web_context else ""
+
+        prompt = f"""You are a data scientist deciding which columns to REMOVE before training a model to predict: "{target_column}".
+{web_section}
+Remaining candidate features:
+{json.dumps(col_info, indent=2)}
+
+Identify columns that have NO meaningful predictive value for "{target_column}" — e.g. columns that are:
+- Pure noise or constants
+- Redundant with another feature already listed
+- Indirect duplicates of the target
+
+Do NOT drop columns that are real physical/chemical/biological measurements relevant to the task.
+Respond ONLY with valid JSON — no markdown:
+{{"drop": ["col1", "col2"], "reason": "one-sentence explanation"}}
+If all columns are useful, respond: {{"drop": [], "reason": "all columns are predictive"}}"""
+
+        response = llm.invoke([
+            SystemMessage(content="You are an expert data scientist. Output valid JSON only."),
+            HumanMessage(content=prompt),
+        ])
+        raw = response.content.strip().lstrip("```json").rstrip("```").strip()
+        result = json.loads(raw)
+        extra_drops = [c for c in result.get("drop", []) if c in remaining_cols]
+        if extra_drops:
+            logger.info(f"LLM feature selection: dropping {extra_drops}. Reason: {result.get('reason')}")
+        return extra_drops
+    except Exception as e:
+        logger.warning(f"LLM feature selection failed (non-blocking): {e}")
+        return []
 
 
 @app.task(bind=True, name="workers.training_tasks.train_tabular")
@@ -218,6 +379,37 @@ def train_tabular(self, job_id: str, file_path: str, target_column: str,
 
         # Smart target column resolution (handles acronyms, case, substrings)
         target_column = _resolve_target_column(target_column, df.columns)
+
+        # Stage 1: heuristic drop (identifiers, name-leakage, correlation-leakage)
+        cols_to_drop = _auto_drop_columns(df, target_column)
+        if cols_to_drop:
+            logger.info(f"Heuristic drop ({len(cols_to_drop)}): {cols_to_drop}")
+            df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
+
+        # Stage 2: NVIDIA LLM feature refinement — runs in a separate thread so
+        # XGBoost training starts immediately and the LLM result is applied if it
+        # finishes before model.fit() returns (large datasets), otherwise ignored.
+        import threading
+        llm_result = {"drops": []}
+        _update_job_db(job_id, {"error_message": "AI analyzing features in background..."})
+
+        def _run_llm():
+            drops = _llm_feature_selection(df, target_column, cols_to_drop)
+            llm_result["drops"] = drops
+            if drops:
+                logger.info(f"LLM drop ({len(drops)}): {drops}")
+            _update_job_db(job_id, {"error_message": None})   # clear the status note
+
+        llm_thread = threading.Thread(target=_run_llm, daemon=True)
+        llm_thread.start()
+
+        # Apply LLM drops if thread finishes quickly (fast LLM response)
+        llm_thread.join(timeout=8.0)   # wait up to 8 s before starting training
+        if llm_result["drops"]:
+            df = df.drop(columns=[c for c in llm_result["drops"] if c in df.columns])
+            cols_to_drop = cols_to_drop + llm_result["drops"]
+        elif llm_thread.is_alive():
+            logger.info("LLM still running — starting XGBoost training now; LLM results will be used next run.")
 
         # Prepare data
         X = df.drop(columns=[target_column])
@@ -261,6 +453,13 @@ def train_tabular(self, job_id: str, file_path: str, target_column: str,
             try:
                 checkpoint_path = _get_model_path(continue_from_model_id)
                 if checkpoint_path and os.path.exists(checkpoint_path):
+                    # Prefer native XGBoost/LightGBM format for warm-start over joblib
+                    native_xgb = checkpoint_path.replace("_model.joblib", "_model.ubj")
+                    native_lgb = checkpoint_path.replace("_model.joblib", "_model.lgb")
+                    if model_lower == "xgboost" and os.path.exists(native_xgb):
+                        checkpoint_path = native_xgb
+                    elif model_lower == "lightgbm" and os.path.exists(native_lgb):
+                        checkpoint_path = native_lgb
                     logger.info(f"Warm-start from checkpoint: {checkpoint_path}")
                 else:
                     checkpoint_path = None
@@ -275,45 +474,107 @@ def train_tabular(self, job_id: str, file_path: str, target_column: str,
         model_lower = model_name.lower()
 
         if model_lower in ("xgboost", "lightgbm"):
-            # Use eval_set for per-round loss tracking
             total_rounds = n_estimators
-            _update_job_db(job_id, {"total_epochs": total_rounds})
-
+            _update_job_db(job_id, {"status": "training", "total_epochs": total_rounds})
             eval_set = [(X_train, y_train), (X_test, y_test)]
-            # XGBoost: pass xgb_model to continue from checkpoint
             fit_kwargs: dict = {"eval_set": eval_set, "verbose": False}
-            if checkpoint_path and model_lower == "xgboost":
-                fit_kwargs["xgb_model"] = checkpoint_path
-            model.fit(X_train, y_train, **fit_kwargs)
 
-            # Extract per-round metrics from eval results
-            if hasattr(model, 'evals_result_'):
-                evals = model.evals_result_
-                # XGBoost format: {'validation_0': {'logloss': [...]}, 'validation_1': {'logloss': [...]}}
-                train_losses = list(list(evals.get('validation_0', {}).values())[0]) if evals.get('validation_0') else []
-                val_losses = list(list(evals.get('validation_1', {}).values())[0]) if evals.get('validation_1') else []
+            if model_lower == "xgboost":
+                # Live per-round callback: writes metrics to DB after every round
+                # so the SSE stream can chart train/val loss in real time.
+                try:
+                    import xgboost as xgb
 
-                for i in range(len(train_losses)):
-                    epoch_data = {
-                        "epoch": epoch_offset + i + 1,
-                        "total_epochs": epoch_offset + total_rounds,
-                        "train_loss": round(train_losses[i], 6),
-                        "val_loss": round(val_losses[i], 6) if i < len(val_losses) else 0,
-                    }
-                    epoch_history.append(epoch_data)
+                    class _LiveCallback(xgb.callback.TrainingCallback):
+                        def after_iteration(cb_self, model_cb, epoch, evals_log):
+                            keys = list(evals_log.keys())
+                            train_key = keys[0] if keys else None
+                            val_key = keys[1] if len(keys) > 1 else None
+                            train_loss = val_loss = 0.0
+                            if train_key:
+                                mk = list(evals_log[train_key].keys())[0]
+                                train_loss = float(evals_log[train_key][mk][-1])
+                            if val_key:
+                                mk = list(evals_log[val_key].keys())[0]
+                                val_loss = float(evals_log[val_key][mk][-1])
+                            ep = {
+                                "epoch": epoch_offset + epoch + 1,
+                                "total_epochs": epoch_offset + total_rounds,
+                                "train_loss": round(train_loss, 6),
+                                "val_loss": round(val_loss, 6),
+                            }
+                            epoch_history.append(ep)
+                            progress = ((epoch + 1) / total_rounds) * 80 + 20
+                            _update_job_db(job_id, {
+                                "progress": round(progress, 1),
+                                "current_epoch": epoch_offset + epoch + 1,
+                                "metrics": json.dumps({"epoch_history": epoch_history}),
+                            })
+                            return False  # keep training
 
-                    # Update DB every 10 rounds for progress
-                    if (i + 1) % max(1, total_rounds // 10) == 0 or i == len(train_losses) - 1:
-                        progress = ((i + 1) / total_rounds) * 80 + 20
+                    fit_kwargs["callbacks"] = [_LiveCallback()]
+                except Exception as cb_err:
+                    logger.warning("XGBoost live callback unavailable: %s", cb_err)
+
+                if checkpoint_path:
+                    fit_kwargs["xgb_model"] = checkpoint_path
+
+            elif model_lower == "lightgbm":
+                # LightGBM callback for live progress
+                try:
+                    def _lgb_callback(env):
+                        epoch = env.iteration
+                        results = env.evaluation_result_list  # [(name, metric, val, higher_better), ...]
+                        train_loss = val_loss = 0.0
+                        for name, _metric, val, _hb in results:
+                            if "training" in name or "train" in name:
+                                train_loss = float(val)
+                            else:
+                                val_loss = float(val)
+                        ep = {
+                            "epoch": epoch_offset + epoch + 1,
+                            "total_epochs": epoch_offset + total_rounds,
+                            "train_loss": round(train_loss, 6),
+                            "val_loss": round(val_loss, 6),
+                        }
+                        epoch_history.append(ep)
+                        progress = ((epoch + 1) / total_rounds) * 80 + 20
                         _update_job_db(job_id, {
                             "progress": round(progress, 1),
-                            "current_epoch": i + 1,
+                            "current_epoch": epoch_offset + epoch + 1,
                             "metrics": json.dumps({"epoch_history": epoch_history}),
                         })
+
+                    _lgb_callback.order = 10
+                    fit_kwargs["callbacks"] = [_lgb_callback]
+                except Exception as cb_err:
+                    logger.warning("LightGBM live callback unavailable: %s", cb_err)
+
+            model.fit(X_train, y_train, **fit_kwargs)
+
+            # Backfill epoch_history from evals_result_ if callback wasn't used
+            if not epoch_history and hasattr(model, 'evals_result_'):
+                evals = model.evals_result_
+                train_losses = list(list(evals.get('validation_0', {}).values())[0]) if evals.get('validation_0') else []
+                val_losses = list(list(evals.get('validation_1', {}).values())[0]) if evals.get('validation_1') else []
+                for i, tl in enumerate(train_losses):
+                    epoch_history.append({
+                        "epoch": epoch_offset + i + 1,
+                        "total_epochs": epoch_offset + total_rounds,
+                        "train_loss": round(tl, 6),
+                        "val_loss": round(val_losses[i], 6) if i < len(val_losses) else 0.0,
+                    })
+                _update_job_db(job_id, {
+                    "progress": 90.0,
+                    "current_epoch": len(epoch_history),
+                    "metrics": json.dumps({"epoch_history": epoch_history}),
+                })
+
         else:
-            # Non-boosting models: single fit
-            _update_job_db(job_id, {"progress": 40.0, "current_epoch": 1, "total_epochs": 1})
+            # Non-boosting models: single fit with progress bookends
+            _update_job_db(job_id, {"status": "training", "progress": 20.0, "current_epoch": 0, "total_epochs": 1})
             model.fit(X_train, y_train)
+            _update_job_db(job_id, {"progress": 80.0, "current_epoch": 1})
 
         _update_job_db(job_id, {"progress": 85.0})
 
@@ -355,6 +616,20 @@ def train_tabular(self, job_id: str, file_path: str, target_column: str,
         model_path = os.path.join(model_dir, f"{job_id}_model.joblib")
         joblib.dump(model, model_path)
 
+        # Also save XGBoost/LightGBM in their native formats so warm-start works correctly
+        if model_lower == "xgboost" and hasattr(model, 'get_booster'):
+            try:
+                xgb_path = os.path.join(model_dir, f"{job_id}_model.ubj")
+                model.get_booster().save_model(xgb_path)
+            except Exception as e:
+                logger.warning("XGBoost native save failed (non-fatal): %s", e)
+        elif model_lower == "lightgbm" and hasattr(model, 'booster_'):
+            try:
+                lgb_path = os.path.join(model_dir, f"{job_id}_model.lgb")
+                model.booster_.save_model(lgb_path)
+            except Exception as e:
+                logger.warning("LightGBM native save failed (non-fatal): %s", e)
+
         # Save checkpoint
         try:
             from services.checkpoint_service import checkpoint_service
@@ -386,6 +661,7 @@ def train_tabular(self, job_id: str, file_path: str, target_column: str,
         _save_model_record_with_features(
             job_id, model_path, "joblib", metrics, training_config,
             feature_names, feature_types, file_path,
+            train_metrics=train_metrics,
         )
 
         return {"status": "completed", "metrics": metrics, "model_path": model_path}

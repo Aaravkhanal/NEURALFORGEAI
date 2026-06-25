@@ -37,6 +37,11 @@ yarn-error.log*
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+
+# --- Trained model artifacts (binary, not source) ---
+backend/models_storage/
 
 # --- Uploads ---
 uploads/

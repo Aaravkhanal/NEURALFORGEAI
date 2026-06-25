@@ -4,6 +4,7 @@ Async SQLAlchemy engine, session management, and base model.
 Supports both SQLite (dev) and PostgreSQL (prod).
 """
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -21,6 +22,14 @@ engine = create_async_engine(
     echo=settings.environment == "development",
     connect_args=connect_args,
 )
+
+# Enable WAL mode for SQLite so the background training thread (sync writer)
+# and the SSE stream (async reader) don't block each other.
+if "sqlite" in settings.database_url:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_wal_mode(dbapi_conn, _):
+        dbapi_conn.execute("PRAGMA journal_mode=WAL")
+        dbapi_conn.execute("PRAGMA busy_timeout=5000")
 
 # Session factory
 async_session = async_sessionmaker(

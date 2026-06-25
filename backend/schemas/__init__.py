@@ -207,6 +207,11 @@ class AutoMLStartRequest(BaseModel):
     training_config: dict = {}
 
 
+class DeriveTargetRequest(BaseModel):
+    file_id: str
+    target_description: str  # e.g. "State of Health"
+
+
 class TrainingJobResponse(BaseModel):
     id: str
     project_id: str

@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger("neuralforge.training_sse")
@@ -35,7 +35,9 @@ async def stream_training_metrics(job_id: str):
         last_epoch = -1
         last_status = None
         poll_count = 0
-        max_polls = 3600  # Max 1 hour of streaming (1s intervals)
+        max_polls = 3600  # 1 hour max
+        queued_polls = 0   # consecutive polls with status="queued"
+        QUEUED_TIMEOUT = 90  # seconds before declaring worker missing
 
         while poll_count < max_polls:
             poll_count += 1
@@ -45,9 +47,7 @@ async def stream_training_metrics(job_id: str):
                 if not job:
                     yield {
                         "event": "error",
-                        "data": json.dumps({
-                            "error": f"Training job {job_id} not found."
-                        }),
+                        "data": json.dumps({"error": f"Training job {job_id} not found."}),
                     }
                     return
 
@@ -57,16 +57,31 @@ async def stream_training_metrics(job_id: str):
                 total_epochs = job.get("total_epochs", 0)
                 metrics_raw = job.get("metrics", "{}")
 
-                # Parse metrics
-                if isinstance(metrics_raw, str):
-                    try:
-                        metrics = json.loads(metrics_raw)
-                    except json.JSONDecodeError:
-                        metrics = {}
+                # Detect Celery worker not running: job stuck in "queued"
+                if status == "queued":
+                    queued_polls += 1
+                    if queued_polls >= QUEUED_TIMEOUT:
+                        yield {
+                            "event": "error",
+                            "data": json.dumps({
+                                "error": (
+                                    "Training job has been queued for over 90 seconds. "
+                                    "The Celery worker may not be running. "
+                                    "Start it with: cd backend && celery -A workers.celery_app worker --loglevel=info"
+                                ),
+                            }),
+                        }
+                        return
                 else:
-                    metrics = metrics_raw or {}
+                    queued_polls = 0
 
-                # Send status update if changed
+                # Parse metrics
+                try:
+                    metrics = json.loads(metrics_raw) if isinstance(metrics_raw, str) else (metrics_raw or {})
+                except json.JSONDecodeError:
+                    metrics = {}
+
+                # Send status update when it changes
                 if status != last_status:
                     last_status = status
                     yield {
@@ -79,18 +94,33 @@ async def stream_training_metrics(job_id: str):
                         }),
                     }
 
-                # Send epoch metrics if new epoch
+                # Forward informational messages written to error_message during training
+                info_note = job.get("error_message", "")
+                if info_note and status == "training" and info_note.startswith("AI "):
+                    yield {
+                        "event": "log",
+                        "data": json.dumps({"message": info_note}),
+                    }
+
+                # Stream new epoch metrics — send ALL accumulated epochs since last poll
                 epoch_history = metrics.get("epoch_history", [])
                 if epoch_history and len(epoch_history) > last_epoch + 1:
-                    for i in range(last_epoch + 1, len(epoch_history)):
-                        epoch_data = epoch_history[i]
-                        yield {
-                            "event": "metrics",
-                            "data": json.dumps(epoch_data),
-                        }
+                    new_epochs = epoch_history[last_epoch + 1:]
+                    # Batch-send: if many epochs arrived, send summary points to keep UI responsive
+                    if len(new_epochs) > 50:
+                        step = max(1, len(new_epochs) // 50)
+                        sampled = new_epochs[::step]
+                        # always include the last one
+                        if sampled[-1] != new_epochs[-1]:
+                            sampled.append(new_epochs[-1])
+                        for ep in sampled:
+                            yield {"event": "metrics", "data": json.dumps(ep)}
+                    else:
+                        for ep in new_epochs:
+                            yield {"event": "metrics", "data": json.dumps(ep)}
                     last_epoch = len(epoch_history) - 1
 
-                # Send progress update
+                # Progress heartbeat
                 yield {
                     "event": "progress",
                     "data": json.dumps({
@@ -100,7 +130,7 @@ async def stream_training_metrics(job_id: str):
                     }),
                 }
 
-                # Check terminal states
+                # Terminal states
                 if status == "completed":
                     final_metrics = metrics.get("final_metrics", {})
                     yield {
@@ -108,18 +138,24 @@ async def stream_training_metrics(job_id: str):
                         "data": json.dumps({
                             "status": "completed",
                             "final_metrics": final_metrics,
+                            "epoch_history": epoch_history,
                             "progress": 100.0,
                         }),
                     }
                     return
 
-                if status == "failed":
+                if status in ("failed", "cancelled"):
+                    error_msg = job.get("error_message") or "Training failed."
+                    # Common errors → friendly messages
+                    if "not found" in error_msg and "target" in error_msg.lower():
+                        error_msg = (
+                            f"{error_msg}\n\nHint: The target column was not found in the dataset. "
+                            "Use the 'Ask AI to Derive Target' button on the training page, "
+                            "or manually select the correct column from the dropdown."
+                        )
                     yield {
                         "event": "error",
-                        "data": json.dumps({
-                            "status": "failed",
-                            "error": job.get("error_message", "Unknown error"),
-                        }),
+                        "data": json.dumps({"error": error_msg}),
                     }
                     return
 
@@ -131,9 +167,8 @@ async def stream_training_metrics(job_id: str):
                 }
                 return
 
-            await asyncio.sleep(1.0)  # Poll every second
+            await asyncio.sleep(0.3)   # 300 ms — fast enough to catch rapid XGBoost epochs
 
-        # Timeout
         yield {
             "event": "error",
             "data": json.dumps({"error": "Stream timeout (1 hour max)."}),
@@ -152,7 +187,7 @@ async def _get_job_from_db(job_id: str) -> Optional[dict]:
             result = await session.execute(
                 text(
                     "SELECT id, status, progress, current_epoch, total_epochs, "
-                    "metrics, error_message FROM training_jobs WHERE id = :job_id"
+                    "metrics, error_message, created_at FROM training_jobs WHERE id = :job_id"
                 ),
                 {"job_id": job_id},
             )
@@ -166,6 +201,7 @@ async def _get_job_from_db(job_id: str) -> Optional[dict]:
                     "total_epochs": int(row[4]) if row[4] else 0,
                     "metrics": row[5] or "{}",
                     "error_message": row[6],
+                    "created_at": row[7],
                 }
     except Exception as e:
         logger.error("Failed to fetch job %s from DB: %s", job_id, e)

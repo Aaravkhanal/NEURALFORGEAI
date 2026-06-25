@@ -55,18 +55,55 @@ export default function TestingPage() {
 
   // Build input fields from dataset profile or model features
   useEffect(() => {
+    // Split camelCase/snake_case/space names into lowercase tokens
+    const tokenize = (name: string) => {
+      return name
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+        .toLowerCase()
+        .split(/[_\s\-]+/)
+        .filter(Boolean);
+    };
+
     const buildFromProfile = () => {
       if (datasetProfile?.columns && datasetProfile.columns.length > 0) {
+        const targetLower = (targetColumn || '').toLowerCase();
+        const targetWords = new Set(tokenize(targetColumn || ''));
+
+        // Mirror the conservative backend logic — only drop unambiguous identifiers.
+        // "number" is NOT here (CycleNumber, StepNumber are real features).
+        const STRONG_SUFFIX = new Set(['id','uuid','barcode','serial']);
+        const PURE_ID_NAMES = new Set(['id','uuid','barcode','serial','batchid','batch_id']);
+        const BATCH_PREFIX  = new Set(['batch','lot']);
+
+        const isIdentifier = (name: string): boolean => {
+          const words = tokenize(name);
+          const nameLower = name.toLowerCase().replace(/[_\-\s]/g, '');
+          if (PURE_ID_NAMES.has(nameLower)) return true;
+          if (words.length > 0 && STRONG_SUFFIX.has(words[words.length - 1])) return true;
+          if (words.length > 0 && BATCH_PREFIX.has(words[0])) return true;
+          return false;
+        };
+
+        const isTargetDerived = (name: string): boolean => {
+          const n = name.toLowerCase();
+          if (n === targetLower) return true;
+          if (n.includes(targetLower) || targetLower.includes(n)) return true;
+          const colWords = new Set(tokenize(name));
+          const overlap = Array.from(colWords).filter(w => targetWords.has(w));
+          return overlap.length > 0 && targetWords.size > 1;
+        };
+
         return datasetProfile.columns
-          .filter((col: any) => col.name !== targetColumn && col.name?.toLowerCase() !== 'id')
-          .slice(0, 10)
+          .filter((col: any) => !isTargetDerived(col.name) && !isIdentifier(col.name))
+          .slice(0, 12)
           .map((col: any) => {
             const isNumeric = ['integer', 'float', 'numeric', 'int64', 'float64', 'number', 'int32', 'float32']
               .includes((col.type || '').toLowerCase());
             return {
               name: col.name,
               type: isNumeric ? 'number' : 'text',
-              label: col.name.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
+              label: tokenize(col.name).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
               default: isNumeric ? 0 : ''
             };
           });
@@ -94,15 +131,18 @@ export default function TestingPage() {
 
     const run = async () => {
       setIsAnalyzing(true);
-      const profileFields = buildFromProfile();
-      if (profileFields) {
-        setGeneratedFields(profileFields);
+      // Model features are authoritative — they are exactly what was used during training
+      // (identifiers, leakage, and derived columns were already filtered out at train time)
+      const modelFields = await loadFromModelFeatures();
+      if (modelFields && modelFields.length > 0) {
+        setGeneratedFields(modelFields);
         setIsAnalyzing(false);
         return;
       }
-      const modelFields = await loadFromModelFeatures();
-      if (modelFields) {
-        setGeneratedFields(modelFields);
+      // Fallback: build from dataset profile with identifier/target filtering
+      const profileFields = buildFromProfile();
+      if (profileFields) {
+        setGeneratedFields(profileFields);
       }
       setIsAnalyzing(false);
     };
@@ -190,19 +230,46 @@ export default function TestingPage() {
         throw new Error('Image prediction requires a deployed image classification model. Please use the tabular or text input modes, or deploy your image model first.');
       }
 
+      const predVal = result.predictions?.[0] ?? 'N/A';
       setPredictionResult({
-        prediction: result.predictions?.[0] ?? 'N/A',
+        prediction: predVal,
         confidence: result.confidence?.[0] != null
           ? `${(result.confidence[0] * 100).toFixed(1)}%`
           : result.probabilities?.[0]
             ? `${(Math.max(...result.probabilities[0]) * 100).toFixed(1)}%`
             : 'N/A',
         latency: result.latency_ms ? `${result.latency_ms}ms` : '—',
-        explanation: result.explanation || `Model: ${selectedModel || 'Trained Model'}. Prediction computed from your input features.`,
+        explanation: 'Generating AI explanation...',
         probabilities: result.probabilities?.[0] || null,
         model_name: result.model_name || selectedModel || 'Trained Model'
       });
       markStageComplete('/dashboard/testing');
+
+      // AI-powered explanation (non-blocking — updates explanation once ready)
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('neuralforge_token') : null;
+        const explainRes = await fetch('/api/backend/training/explain-prediction', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+          body: JSON.stringify({
+            predicted_value: predVal,
+            target_column: targetColumn || 'target',
+            model_type: selectedModel || 'ML model',
+            input_features: inputType === 'tabular' ? formData : parsedFeatures,
+            problem_context: problemContext?.description || problemContext?.task_type || '',
+          }),
+        });
+        if (explainRes.ok) {
+          const { explanation } = await explainRes.json();
+          if (explanation) {
+            setPredictionResult((prev: any) => prev ? { ...prev, explanation } : prev);
+          }
+        }
+      } catch {
+        setPredictionResult((prev: any) =>
+          prev ? { ...prev, explanation: `Predicted ${targetColumn || 'value'}: ${predVal}` } : prev
+        );
+      }
 
     } catch (e: any) {
       setPredictionError(e.message);

@@ -92,6 +92,7 @@ export default function TrainingPage() {
   const {
     markStageComplete, selectedModel, fileId, targetColumn,
     problemContext, setTrainedModelId, datasetProfile, trainedModelId,
+    setFileId,
   } = usePipeline();
 
   const activeModel = selectedModel || 'XGBoost';
@@ -101,10 +102,13 @@ export default function TrainingPage() {
   const [valPct, setValPct]   = useState(15);
   const [testPct, setTestPct] = useState(15);
   const [splitLocked, setSplitLocked] = useState(false);
+  // Row count — populated when the cleaning profile is fetched (see useEffect below)
+  const [profileRowCount, setProfileRowCount] = useState<number>(0);
 
-  const totalRows = datasetProfile
-    ? (Object.values(datasetProfile as Record<string, any>)[0]?.total_rows ?? 0)
-    : 0;
+  const totalRows = profileRowCount
+    || (datasetProfile
+      ? (Object.values(datasetProfile as Record<string, any>)[0]?.total_rows ?? 0)
+      : 0);
 
   // Keep splits summing to 100 when user drags
   const handleTrainPct = (v: number) => {
@@ -147,19 +151,25 @@ export default function TrainingPage() {
     fetch(`/api/backend/cleaning/analysis/${fileId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(profile => {
-        if (profile?.columns) {
-          const cols = profile.columns.map((c: any) => c.name);
-          setAvailableColumns(cols);
-          // Auto-set override if targetColumn not in columns
-          if (targetColumn && !cols.includes(targetColumn)) {
-            // Try to smart-pick: find the column whose acronym matches
-            const words = targetColumn.replace(/[_-]/g, ' ').split(/\s+/).filter(Boolean);
-            const acronym = words.map((w: string) => w[0]).join('').toLowerCase();
-            const match = cols.find((c: string) => c.toLowerCase() === acronym)
-              || cols.find((c: string) => c.toLowerCase().includes(acronym))
-              || cols.find((c: string) => targetColumn.toLowerCase().includes(c.toLowerCase()));
-            if (match) setTargetOverride(match);
-          }
+        if (!profile) return;
+        const cols = profile.columns?.map((c: any) => c.name) ?? Object.keys(profile);
+        setAvailableColumns(cols.filter(Boolean));
+        // Extract row count from wherever the API puts it
+        const rows = profile.total_rows
+          ?? profile.row_count
+          ?? profile.num_rows
+          ?? profile.columns?.[0]?.total_rows
+          ?? profile.columns?.[0]?.count
+          ?? 0;
+        if (rows > 0) setProfileRowCount(Number(rows));
+        // Auto-set override if targetColumn not in columns
+        if (targetColumn && !cols.includes(targetColumn)) {
+          const words = targetColumn.replace(/[_-]/g, ' ').split(/\s+/).filter(Boolean);
+          const acronym = words.map((w: string) => w[0]).join('').toLowerCase();
+          const match = cols.find((c: string) => c.toLowerCase() === acronym)
+            || cols.find((c: string) => c.toLowerCase().includes(acronym))
+            || cols.find((c: string) => targetColumn.toLowerCase().includes(c.toLowerCase()));
+          if (match) setTargetOverride(match);
         }
       })
       .catch(() => {});
@@ -177,57 +187,178 @@ export default function TrainingPage() {
   const [finalMetrics, setFinalMetrics] = useState<Record<string, number> | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobProjectId, setJobProjectId] = useState<string | null>(null);
   const [localModelId, setLocalModelId] = useState<string | null>(null);
   const [downloadFormats, setDownloadFormats] = useState<any[]>([]);
   const [downloadingFormat, setDownloadingFormat] = useState<string | null>(null);
 
+  // ── AI hyperparameter suggestion state ──────────────────────────
+  const [isSuggestingParams, setIsSuggestingParams] = useState(false);
+  const [paramSuggestReason, setParamSuggestReason] = useState<string | null>(null);
+
+  // ── AI derive target state ────────────────────────────────────
+  const [isDerivingTarget, setIsDerivingTarget] = useState(false);
+  const [deriveMessage, setDeriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleDeriveTarget = async () => {
+    if (!fileId || !targetColumn) return;
+    setIsDerivingTarget(true);
+    setDeriveMessage(null);
+    try {
+      const token = getToken();
+      const res = await fetch('/api/backend/training/derive-target', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ file_id: fileId, target_description: targetColumn }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (data.strategy === 'match' && data.matched_column) {
+        setTargetOverride(data.matched_column);
+        setDeriveMessage({ type: 'success', text: `AI matched "${targetColumn}" → "${data.matched_column}". ${data.explanation}` });
+      } else if (data.strategy === 'derive' && data.new_column_name) {
+        setTargetOverride(data.new_column_name);
+        if (data.derived_file_id) {
+          setFileId(data.derived_file_id);
+          // Refresh columns for new file
+          const colRes = await fetch(`/api/backend/cleaning/analysis/${data.derived_file_id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (colRes.ok) {
+            const profile = await colRes.json();
+            if (profile?.columns) setAvailableColumns(profile.columns.map((c: any) => c.name));
+          }
+        }
+        setDeriveMessage({ type: 'success', text: `AI derived column "${data.new_column_name}" using: ${data.formula}. ${data.explanation}` });
+      } else {
+        setDeriveMessage({ type: 'error', text: data.explanation || 'AI could not determine the target. Please select manually.' });
+      }
+    } catch (e: any) {
+      setDeriveMessage({ type: 'error', text: 'AI request failed. Please select the target column manually from the dropdown.' });
+    } finally {
+      setIsDerivingTarget(false);
+    }
+  };
+
   const esRef = useRef<EventSource | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const chartDataRef = useRef<any[]>([]);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const receivedProgressRef = useRef(false);
+  const warnedQueuedRef = useRef(false);
 
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
-  useEffect(() => () => { esRef.current?.close(); }, []);
+  useEffect(() => () => {
+    esRef.current?.close();
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+  }, []);
 
   const addLog = useCallback((msg: string) => setLogs(prev => [...prev, msg]), []);
 
   // ── Fetch trained model after job completes ───────────────────
-  const resolveModelId = useCallback(async (jid: string, pid: string) => {
+  const resolveModelId = useCallback(async (jid: string, pid: string | null) => {
     const token = getToken();
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await new Promise(r => setTimeout(r, 1000 + attempt * 500));
-      try {
-        const res = await fetch(`/api/backend/training/models-trained/${pid}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const models: any[] = await res.json();
-          const match = models.find((m: any) => m.training_job_id === jid);
-          if (match?.id) {
-            setTrainedModelId(match.id);
-            setLocalModelId(match.id);
-            addLog(`[SUCCESS] Model persisted — ID: ${match.id.slice(0, 8)}...`);
-            // Fetch available download formats
-            const fmtRes = await fetch(`/api/backend/export/model/${match.id}/formats`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (fmtRes.ok) {
-              const fmtData = await fmtRes.json();
-              setDownloadFormats(fmtData.formats || []);
+
+    // 1. Poll project models list (fast path when project_id exists)
+    if (pid) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise(r => setTimeout(r, 1000 + attempt * 500));
+        try {
+          const res = await fetch(`/api/backend/training/models-trained/${pid}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const models: any[] = await res.json();
+            const match = models.find((m: any) => m.training_job_id === jid);
+            if (match?.id) {
+              setTrainedModelId(match.id);
+              setLocalModelId(match.id);
+              addLog(`[SUCCESS] Model persisted — ID: ${match.id.slice(0, 8)}...`);
+              const fmtRes = await fetch(`/api/backend/export/model/${match.id}/formats`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (fmtRes.ok) {
+                const fmtData = await fmtRes.json();
+                setDownloadFormats(fmtData.formats || []);
+              }
+              return match.id;
             }
-            return match.id;
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
-    // Fallback to job ID so user can at least try to download
+
+    // 2. Fallback: look up directly by job ID (works even without project_id)
+    try {
+      await new Promise(r => setTimeout(r, 1500));
+      const byJobRes = await fetch(`/api/backend/training/model-by-job/${jid}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (byJobRes.ok) {
+        const m = await byJobRes.json();
+        if (m?.id) {
+          setTrainedModelId(m.id);
+          setLocalModelId(m.id);
+          addLog(`[SUCCESS] Model resolved via job lookup — ID: ${m.id.slice(0, 8)}...`);
+          const fmtRes = await fetch(`/api/backend/export/model/${m.id}/formats`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (fmtRes.ok) {
+            const fmtData = await fmtRes.json();
+            setDownloadFormats(fmtData.formats || []);
+          }
+          return m.id;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Last resort: use job ID directly so Continue Training is not blocked
+    addLog(`[WARN] Could not resolve trained model record. Using job ID as fallback.`);
     setTrainedModelId(jid);
     setLocalModelId(jid);
     return jid;
   }, [addLog, setTrainedModelId]);
 
+  // ── REST fallback: poll job status every 5s when SSE delivers no progress ──
+  const startRestPoll = useCallback((jid: string) => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    receivedProgressRef.current = false;
+    warnedQueuedRef.current = false;
+    pollTimerRef.current = setInterval(async () => {
+      if (receivedProgressRef.current) {
+        clearInterval(pollTimerRef.current!);
+        return;
+      }
+      try {
+        const token = getToken();
+        const res = await fetch(`/api/backend/training/jobs/${jid}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const job = await res.json();
+        if (job.status === 'failed') {
+          clearInterval(pollTimerRef.current!);
+          esRef.current?.close();
+          const msg = job.error_message || 'Training failed on the backend.';
+          setStatus('error');
+          setErrorMsg(msg);
+          addLog(`[ERROR] ${msg}`);
+        } else if (job.status === 'completed') {
+          clearInterval(pollTimerRef.current!);
+          if (job.progress >= 100) resolveModelId(jid, jobProjectId);
+        } else if (job.status === 'queued' && !warnedQueuedRef.current) {
+          warnedQueuedRef.current = true;
+          addLog('[WARN] Job is queued. If training does not start, run: celery -A workers.celery_app worker --loglevel=info');
+        }
+      } catch (_) {}
+    }, 5000);
+  }, [addLog, jobProjectId, resolveModelId]);
+
   // ── SSE Stream ────────────────────────────────────────────────
   const startSSE = useCallback((jid: string, pid: string) => {
     esRef.current?.close();
+    startRestPoll(jid);
     const es = new EventSource(`/api/backend/training/stream/${jid}`);
     esRef.current = es;
 
@@ -236,7 +367,13 @@ export default function TrainingPage() {
       addLog(`[INFO] ${d.status} — epoch ${d.current_epoch}/${d.total_epochs}`);
     });
 
+    es.addEventListener('log', (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      if (d.message) addLog(`[INFO] ${d.message}`);
+    });
+
     es.addEventListener('metrics', (e: MessageEvent) => {
+      receivedProgressRef.current = true;
       const d = JSON.parse(e.data);
       const point = {
         epoch: d.epoch,
@@ -253,6 +390,7 @@ export default function TrainingPage() {
 
     es.addEventListener('progress', (e: MessageEvent) => {
       const d = JSON.parse(e.data);
+      if ((d.progress ?? 0) > 0) receivedProgressRef.current = true;
       setProgress(d.progress ?? 0);
       setCurrentEpoch(d.current_epoch ?? 0);
     });
@@ -260,22 +398,33 @@ export default function TrainingPage() {
     es.addEventListener('complete', async (e: MessageEvent) => {
       const d = JSON.parse(e.data);
       es.close();
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current!);
       setStatus('completed');
       setProgress(100);
       const fm: Record<string, number> = d.final_metrics || {};
       setFinalMetrics(fm);
+      // If training was very fast and we missed live metrics, load epoch_history from complete event
+      if (chartDataRef.current.length === 0 && d.epoch_history?.length) {
+        const points = d.epoch_history.map((ep: any) => ({
+          epoch: ep.epoch,
+          train_loss: parseFloat(ep.train_loss?.toFixed(6) ?? '0'),
+          val_loss: parseFloat(ep.val_loss?.toFixed(6) ?? '0'),
+        }));
+        chartDataRef.current = points;
+        setChartData(points);
+      }
       const metricStr = Object.entries(fm)
         .map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toFixed(4) : v}`)
         .join(', ');
       addLog(`[SUCCESS] Training complete! ${metricStr}`);
       markStageComplete('/dashboard/training');
-      const finalInsight = analyzeTraining(chartDataRef.current);
-      setInsight(finalInsight);
+      setInsight(analyzeTraining(chartDataRef.current));
       await resolveModelId(jid, pid);
     });
 
     es.addEventListener('error', (e: MessageEvent) => {
       es.close();
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current!);
       try {
         const d = JSON.parse((e as any).data || '{}');
         if (d.error) {
@@ -285,11 +434,15 @@ export default function TrainingPage() {
           return;
         }
       } catch (_) {}
+      // Fallback for malformed error events
+      setStatus('error');
+      setErrorMsg('Training stream error. Check backend logs.');
+      addLog('[ERROR] Training stream disconnected unexpectedly.');
     });
 
     es.onerror = () => {
-      if (es.readyState === EventSource.CLOSED) {
-        // Server closed the stream — normal after completion
+      if (es.readyState !== EventSource.CLOSED) {
+        addLog('[WARN] SSE connection interrupted, retrying...');
       }
     };
   }, [addLog, markStageComplete, resolveModelId]);
@@ -359,6 +512,7 @@ export default function TrainingPage() {
 
       const job = await res.json();
       setJobId(job.id);
+      setJobProjectId(job.project_id ?? null);
       addLog(`[INFO] Job ${job.id.slice(0, 8)} queued (${taskType} / ${modelKey})`);
       addLog(`[INFO] Training on ${Math.round(totalRows * trainPct / 100) || '?'} rows, validating on ${Math.round(totalRows * valPct / 100) || '?'} rows...`);
       startSSE(job.id, job.project_id);
@@ -372,14 +526,18 @@ export default function TrainingPage() {
 
   const handleStop = () => {
     esRef.current?.close();
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     setStatus('completed');
     addLog('[INFO] Training stopped by user.');
     setInsight(analyzeTraining(chartDataRef.current));
     markStageComplete('/dashboard/training');
+    if (jobId) resolveModelId(jobId, jobProjectId);
   };
 
   // ── Retrain from scratch ──────────────────────────────────────
   const handleRetrain = () => {
+    esRef.current?.close();
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     setSplitLocked(false);
     setStatus('idle');
     setChartData([]);
@@ -391,6 +549,56 @@ export default function TrainingPage() {
     setCurrentEpoch(0);
     setLocalModelId(null);
     setDownloadFormats([]);
+    setParamSuggestReason(null);
+    // Reset pipeline context so testing page doesn't use the old model
+    setTrainedModelId(null);
+  };
+
+  // ── AI hyperparameter suggestions ─────────────────────────────
+  const handleSuggestParams = async () => {
+    if (!fileId) return;
+    setIsSuggestingParams(true);
+    setParamSuggestReason(null);
+    const token = typeof window !== 'undefined' ? localStorage.getItem('neuralforge_token') : null;
+    try {
+      const nRows = datasetProfile
+        ? (Object.values(datasetProfile as Record<string, any>)[0]?.total_rows ?? 1000)
+        : 1000;
+      const nFeatures = datasetProfile
+        ? (Object.values(datasetProfile as Record<string, any>)[0]?.columns?.length ?? 10)
+        : 10;
+      const res = await fetch('/api/backend/training/suggest-hyperparams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+        body: JSON.stringify({
+          model_type: activeModel,
+          n_rows: nRows,
+          n_features: nFeatures,
+          target_column: effectiveTarget || targetColumn || 'target',
+          problem_type: problemContext?.task_type || 'regression',
+          current_params: {
+            learning_rate: parseFloat(learningRate) || 0.1,
+            max_depth: maxDepth,
+            n_estimators: nEstimators,
+            reg_alpha: parseFloat(regAlpha) || 0.0,
+            reg_lambda: parseFloat(regLambda) || 1.0,
+          },
+        }),
+      });
+      if (res.ok) {
+        const { params, reason } = await res.json();
+        if (params.learning_rate != null) setLearningRate(String(params.learning_rate));
+        if (params.max_depth != null) setMaxDepth(params.max_depth);
+        if (params.n_estimators != null) setNEstimators(params.n_estimators);
+        if (params.reg_alpha != null) setRegAlpha(String(params.reg_alpha));
+        if (params.reg_lambda != null) setRegLambda(String(params.reg_lambda));
+        setParamSuggestReason(reason || 'Parameters tuned for your dataset.');
+      }
+    } catch {
+      setParamSuggestReason('Could not reach AI. Using current values.');
+    } finally {
+      setIsSuggestingParams(false);
+    }
   };
 
   // ── Continue from existing checkpoint ────────────────────────
@@ -625,19 +833,59 @@ export default function TrainingPage() {
                 <Activity size={15} className="text-[#FF4400]" />
                 <span className="section-label">TARGET COLUMN</span>
               </div>
-              {targetColumn && !availableColumns.includes(targetColumn) && !targetOverride && (
-                <div className="mb-2 text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⚠ "{targetColumn}" not found in dataset. Select the correct column below.
-                </div>
-              )}
-              {targetColumn && !availableColumns.includes(targetColumn) && targetOverride && (
+
+              {/* Auto-matched banner */}
+              {targetColumn && !availableColumns.includes(targetColumn) && targetOverride && !deriveMessage && (
                 <div className="mb-2 text-[11px] text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                   ✓ Auto-matched "{targetColumn}" → <strong>{targetOverride}</strong>
                 </div>
               )}
+
+              {/* AI derive result */}
+              {deriveMessage && (
+                <div className={`mb-2 text-[11px] rounded-lg px-3 py-2 border ${
+                  deriveMessage.type === 'success'
+                    ? 'text-green-700 bg-green-50 border-green-200'
+                    : 'text-amber-700 bg-amber-50 border-amber-200'
+                }`}>
+                  {deriveMessage.type === 'success' ? '✓ ' : '⚠ '}{deriveMessage.text}
+                </div>
+              )}
+
+              {/* Not-found warning + Ask AI button */}
+              {targetColumn && !availableColumns.includes(targetColumn) && !targetOverride && !deriveMessage && (
+                <div className="mb-2 space-y-2">
+                  <div className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    ⚠ "{targetColumn}" not found in dataset. Ask AI to find or derive it, or select manually below.
+                  </div>
+                  <button
+                    onClick={handleDeriveTarget}
+                    disabled={isDerivingTarget}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-[#FF4400] text-white rounded-lg text-[11px] font-bold hover:bg-[#e53d00] transition-colors disabled:opacity-50"
+                  >
+                    {isDerivingTarget
+                      ? <><Loader2 size={11} className="animate-spin" /> Analyzing dataset...</>
+                      : <><Zap size={11} /> Ask AI to Derive Target</>}
+                  </button>
+                </div>
+              )}
+
+              {/* Re-run AI when override is already set */}
+              {targetColumn && !availableColumns.includes(targetColumn) && (targetOverride || deriveMessage) && (
+                <button
+                  onClick={handleDeriveTarget}
+                  disabled={isDerivingTarget}
+                  className="w-full flex items-center justify-center gap-1.5 mb-2 py-1.5 bg-white border border-[#f0ebe1] text-[#555] rounded-lg text-[11px] font-bold hover:border-[#FF4400] hover:text-[#FF4400] transition-colors disabled:opacity-50"
+                >
+                  {isDerivingTarget
+                    ? <><Loader2 size={11} className="animate-spin" /> Analyzing...</>
+                    : <><Zap size={11} /> Re-run AI Analysis</>}
+                </button>
+              )}
+
               <select
                 value={effectiveTarget}
-                onChange={e => setTargetOverride(e.target.value)}
+                onChange={e => { setTargetOverride(e.target.value); setDeriveMessage(null); }}
                 className="w-full h-9 bg-white border border-[#f0ebe1] rounded-lg px-3 text-[13px] outline-none focus:border-[#FF4400] font-mono"
               >
                 <option value="">— select target —</option>
@@ -650,10 +898,25 @@ export default function TrainingPage() {
 
           {/* ── Hyperparameters ── */}
           <div className={`dashed-card transition-opacity ${isTraining ? 'opacity-60 pointer-events-none' : ''}`}>
-            <div className="flex items-center gap-2 mb-4 border-b border-[#f0ebe1] pb-3">
-              <Settings2 size={15} className="text-[#FF4400]" />
-              <span className="section-label">HYPERPARAMETERS</span>
+            <div className="flex items-center justify-between mb-4 border-b border-[#f0ebe1] pb-3">
+              <div className="flex items-center gap-2">
+                <Settings2 size={15} className="text-[#FF4400]" />
+                <span className="section-label">HYPERPARAMETERS</span>
+              </div>
+              <button
+                onClick={handleSuggestParams}
+                disabled={isSuggestingParams || !fileId}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#fff8f5] border border-[#FF4400]/30 text-[#FF4400] hover:bg-[#FF4400]/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {isSuggestingParams ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+                AI Suggest
+              </button>
             </div>
+            {paramSuggestReason && (
+              <div className="mb-3 px-2.5 py-2 rounded-lg bg-[#f0fdf4] border border-[#86efac] text-[11px] text-[#166534]">
+                {paramSuggestReason}
+              </div>
+            )}
             <div className="space-y-3">
               {[
                 { label: 'Learning Rate', value: learningRate, onChange: setLearningRate, type: 'text', hint: 'e.g. 0.01 – 0.3' },
@@ -714,15 +977,29 @@ export default function TrainingPage() {
 
           {/* ── Action Button ── */}
           <div>
-            {!isTraining && !isDone && (
-              <button
-                onClick={handleStart}
-                disabled={!fileId || trainPct + valPct + testPct !== 100}
-                className="w-full flex items-center justify-center gap-2 bg-[#FF4400] text-white rounded-xl py-3.5 font-bold text-[15px] shadow-[0_8px_24px_rgba(255,68,0,0.25)] hover:shadow-[0_12px_30px_rgba(255,68,0,0.35)] hover:-translate-y-0.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
-              >
-                <Play size={18} className="ml-0.5" /> Start Training
-              </button>
-            )}
+            {!isTraining && !isDone && (() => {
+              const noTarget = availableColumns.length > 0 && !effectiveTarget;
+              const splitBad = trainPct + valPct + testPct !== 100;
+              const disabled = !fileId || splitBad || noTarget;
+              const hint = noTarget
+                ? 'Select a target column above before training'
+                : splitBad ? 'Train + Val + Test must equal 100%' : '';
+              return (
+                <div>
+                  <button
+                    onClick={handleStart}
+                    disabled={disabled}
+                    title={hint}
+                    className="w-full flex items-center justify-center gap-2 bg-[#FF4400] text-white rounded-xl py-3.5 font-bold text-[15px] shadow-[0_8px_24px_rgba(255,68,0,0.25)] hover:shadow-[0_12px_30px_rgba(255,68,0,0.35)] hover:-translate-y-0.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                  >
+                    <Play size={18} className="ml-0.5" /> Start Training
+                  </button>
+                  {hint && (
+                    <p className="text-[10px] text-amber-600 text-center mt-1">{hint}</p>
+                  )}
+                </div>
+              );
+            })()}
             {isTraining && (
               <button
                 onClick={handleStop}
