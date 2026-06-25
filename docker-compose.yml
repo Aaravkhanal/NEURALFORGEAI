@@ -1,0 +1,159 @@
+# ============================================================
+# NeuralForge V2 — Full-Stack Docker Compose
+# Backend + Frontend + Redis + Celery Workers
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ── PostgreSQL Database ──────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: neuralforge-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: neuralforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: neuralforge-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI Backend ──────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: neuralforge-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@db:5432/neuralforge
+      - UPLOAD_DIR=/app/data/uploads
+      - MODEL_STORAGE_DIR=/app/data/models
+      - BACKEND_URL=http://localhost:8000
+      - FRONTEND_URL=http://localhost:3000
+      - ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      # Inject keys here or in a local .env file
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-neuralforge-super-secret-key-256}
+    volumes:
+      - backend-data:/app/data
+      - model-storage:/app/data/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Celery Worker (CPU Tasks) ────────────────────────────
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: neuralforge-celery-worker
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2 -Q default,training-cpu
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@db:5432/neuralforge
+      - UPLOAD_DIR=/app/data/uploads
+      - MODEL_STORAGE_DIR=/app/data/models
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - backend-data:/app/data
+      - model-storage:/app/data/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery GPU Worker (GPU Training Tasks) ───────────────
+  # Uncomment when NVIDIA GPU is available
+  # celery-gpu-worker:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: ../docker/Dockerfile.gpu-worker
+  #   container_name: neuralforge-celery-gpu-worker
+  #   command: celery -A workers.celery_app worker --loglevel=info --concurrency=1 -Q training-gpu
+  #   environment:
+  #     - DATABASE_URL=sqlite+aiosqlite:///./data/neuralforge.db
+  #     - UPLOAD_DIR=/app/data/uploads
+  #     - MODEL_STORAGE_DIR=/app/data/models
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - CELERY_BROKER_URL=redis://redis:6379/0
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/1
+  #   volumes:
+  #     - backend-data:/app/data
+  #     - model-storage:/app/data/models
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # ── Next.js Frontend ─────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: neuralforge-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - BACKEND_URL=http://backend:8000
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - NEXT_PUBLIC_GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  redis-data:
+  model-storage:
+  postgres-data:

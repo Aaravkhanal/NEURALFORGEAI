@@ -1,0 +1,552 @@
+
+> frontend@0.1.0 lint
+> eslint
+
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/cleaning/page.tsx
+  23:9  error    Error: Cannot access variable before it is declared
+
+`handleSelectFile` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/cleaning/page.tsx:23:9
+  21 |       setFiles(res || []);
+  22 |       if (res && res.length > 0) {
+> 23 |         handleSelectFile(res[0].id);
+     |         ^^^^^^^^^^^^^^^^ `handleSelectFile` accessed before it is declared
+  24 |       }
+  25 |     });
+  26 |   }, []);
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/cleaning/page.tsx:28:3
+  26 |   }, []);
+  27 |
+> 28 |   const handleSelectFile = async (id: string) => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 29 |     const file = files.find(f => f.id === id);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 30 |     setSelectedFile(file);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 31 |     const prof = await api.get(`/api/files/${id}/profile`);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 32 |     setProfile(prof);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 33 |     setOperations([]);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 34 |   };
+     | ^^^^^ `handleSelectFile` is declared here
+  35 |
+  36 |   const addOperation = (type: string, column: string, strategy: string = '') => {
+  37 |     setOperations([...operations, { type, column, strategy }]);  react-hooks/immutability
+  26:6  warning  React Hook useEffect has a missing dependency: 'handleSelectFile'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/deployment/page.tsx
+  24:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/deployment/page.tsx:24:5
+  22 |     }
+  23 |
+> 24 |     setModel(selected);
+     |     ^^^^^^^^ Avoid calling setState() directly within an effect
+  25 |     const parsedData = JSON.parse(data);
+  26 |     setResults(parsedData);
+  27 |                                                                                                                                                                                                                                                                                                                                                                                                                                                           react-hooks/set-state-in-effect
+  28:5  error  Error: Cannot access variable before it is declared
+
+`generateDeploymentCode` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/deployment/page.tsx:28:5
+  26 |     setResults(parsedData);
+  27 |
+> 28 |     generateDeploymentCode(selected, parsedData.target_column);
+     |     ^^^^^^^^^^^^^^^^^^^^^^ `generateDeploymentCode` accessed before it is declared
+  29 |   }, [router]);
+  30 |
+  31 |   const generateDeploymentCode = async (modelName: string, targetCol: string) => {
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/deployment/page.tsx:31:3
+  29 |   }, [router]);
+  30 |
+> 31 |   const generateDeploymentCode = async (modelName: string, targetCol: string) => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 32 |     const projectId = localStorage.getItem('neuralforge_active_project_id');
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 33 |     if (!projectId) return;
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 50 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 51 |   };
+     | ^^^^^ `generateDeploymentCode` is declared here
+  52 |
+  53 |   if (!deploymentData) {
+  54 |     return (  react-hooks/immutability
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/history/page.js
+  35:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  33 |
+  34 |   useEffect(() => {
+> 35 |     fetchProjects();
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  36 |   }, []);
+  37 |
+  38 |   const handleOpenWorkspace = (projectId) => {  react-hooks/set-state-in-effect
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/layout.tsx
+  46:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/layout.tsx:46:7
+  44 |     const saved = localStorage.getItem('neuralforge_theme');
+  45 |     if (saved === 'dark' || saved === 'light') {
+> 46 |       setTheme(saved);
+     |       ^^^^^^^^ Avoid calling setState() directly within an effect
+  47 |       document.documentElement.setAttribute('data-theme', saved);
+  48 |     }
+  49 |   }, []);  react-hooks/set-state-in-effect
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/page.tsx
+  58:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/page.tsx:58:5
+  56 |
+  57 |   useEffect(() => {
+> 58 |     fetchStats();
+     |     ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  59 |   }, []);
+  60 |
+  61 |   const handleCreateProject = async (e: React.FormEvent) => {  react-hooks/set-state-in-effect
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/workspace/page.tsx
+  118:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/dashboard/workspace/page.tsx:118:7
+  116 |   useEffect(() => {
+  117 |     if (!selectedConvId) {
+> 118 |       setMessages([]);
+      |       ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  119 |       return;
+  120 |     }
+  121 |  react-hooks/set-state-in-effect
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/layout.tsx
+  26:9  warning  Custom fonts not added in `pages/_document.js` will only load for a single page. This is discouraged. See: https://nextjs.org/docs/messages/no-page-custom-font  @next/next/no-page-custom-font
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/app/pipeline/page.tsx
+  212:55  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  212:59  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  212:71  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  212:79  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  224:27  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  224:34  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  224:40  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  224:48  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/chat/ChatBot.tsx
+  83:13  error  Error: This value cannot be modified
+
+This modifies a variable that React considers immutable.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/chat/ChatBot.tsx:83:13
+  81 |             const parsed = JSON.parse(data);
+  82 |             const token = parsed.choices?.[0]?.delta?.content || '';
+> 83 |             accumulated += token;
+     |             ^^^^^^^^^^^ `accumulated` cannot be modified
+  84 |             setMessages((prev) => {
+  85 |               const n = [...prev];
+  86 |               n[n.length - 1] = { role: 'assistant', content: accumulated };  react-hooks/immutability
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/dataset/DatasetProfiler.tsx
+  24:17  error    Error: Cannot access variable before it is declared
+
+`fetchProfile` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/dataset/DatasetProfiler.tsx:24:17
+  22 |
+  23 |   useEffect(() => {
+> 24 |     if (fileId) fetchProfile();
+     |                 ^^^^^^^^^^^^ `fetchProfile` accessed before it is declared
+  25 |   }, [fileId]);
+  26 |
+  27 |   const fetchProfile = async () => {
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/dataset/DatasetProfiler.tsx:27:3
+  25 |   }, [fileId]);
+  26 |
+> 27 |   const fetchProfile = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 28 |     setLoading(true);
+     | ^^^^^^^^^^^^^^^^^^^^^
+> 29 |     setError(null);
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^
+> 38 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^
+> 39 |   };
+     | ^^^^^ `fetchProfile` is declared here
+  40 |
+  41 |   if (loading) {
+  42 |     return (  react-hooks/immutability
+  25:6   warning  React Hook useEffect has a missing dependency: 'fetchProfile'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/dataset/UniversalUploader.tsx
+  59:7  error    Error: Cannot access variable before it is declared
+
+`uploadFile` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/dataset/UniversalUploader.tsx:59:7
+  57 |     const files = e.dataTransfer.files;
+  58 |     if (files.length > 0) {
+> 59 |       uploadFile(files[0]);
+     |       ^^^^^^^^^^ `uploadFile` accessed before it is declared
+  60 |     }
+  61 |   }, [projectId]);
+  62 |
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/dataset/UniversalUploader.tsx:70:3
+   68 |   }, [projectId]);
+   69 |
+>  70 |   const uploadFile = async (file: File) => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  71 |     setIsUploading(true);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^
+>  72 |     setProgress(0);
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^
+>  99 |     }
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^
+> 100 |   };
+      | ^^^^^ `uploadFile` is declared here
+  101 |
+  102 |   const resetUpload = () => {
+  103 |     setUploadResult(null);  react-hooks/immutability
+  61:6  warning  React Hook useCallback has a missing dependency: 'uploadFile'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/exhaustive-deps
+  68:6  warning  React Hook useCallback has a missing dependency: 'uploadFile'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/landing/HowItWorks.tsx
+  108:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/landing/HowItWorks.tsx:108:5
+  106 |     }
+  107 |
+> 108 |     setDisplayedCode('');
+      |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  109 |     setIsTyping(true);
+  110 |     let charIndex = 0;
+  111 |     const fullText = currentStep.code;  react-hooks/set-state-in-effect
+  128:6  warning  React Hook useEffect has a missing dependency: 'currentStep.code'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/layout/Navbar.tsx
+  51:21  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/layout/Navbar.tsx:51:21
+  49 |   }, [handleClickOutside]);
+  50 |
+> 51 |   useEffect(() => { setMobileMenuOpen(false); }, [pathname]);
+     |                     ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  52 |
+  53 |   return (
+  54 |     <header  react-hooks/set-state-in-effect
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/CodeGenerator.tsx
+  35:5  error    Error: Cannot access variable before it is declared
+
+`generateCode` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/CodeGenerator.tsx:35:5
+  33 |
+  34 |   useEffect(() => {
+> 35 |     generateCode();
+     |     ^^^^^^^^^^^^ `generateCode` accessed before it is declared
+  36 |   }, [framework]);
+  37 |
+  38 |   const generateCode = async () => {
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/CodeGenerator.tsx:38:3
+  36 |   }, [framework]);
+  37 |
+> 38 |   const generateCode = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 39 |     try {
+     | ^^^^^^^^^
+> 40 |       setLoading(true);
+     …
+     | ^^^^^^^^^
+> 67 |     }
+     | ^^^^^^^^^
+> 68 |   };
+     | ^^^^^ `generateCode` is declared here
+  69 |
+  70 |   const handleCopy = async () => {
+  71 |     if (!generated) return;  react-hooks/immutability
+  36:6  warning  React Hook useEffect has a missing dependency: 'generateCode'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/DatasetDiscovery.tsx
+   73:9   error    Error: Cannot access variable before it is declared
+
+`handleGenerateSynthetic` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/DatasetDiscovery.tsx:73:9
+  71 |     if (defaultMode === 'generate') {
+  72 |       setTimeout(() => {
+> 73 |         handleGenerateSynthetic();
+     |         ^^^^^^^^^^^^^^^^^^^^^^^ `handleGenerateSynthetic` accessed before it is declared
+  74 |       }, 100);
+  75 |     } else {
+  76 |       searchDatasets();
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/DatasetDiscovery.tsx:150:3
+  148 |   };
+  149 |
+> 150 |   const handleGenerateSynthetic = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 151 |     setIsGenerating(true);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 152 |     try {
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 174 |     }
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 175 |   };
+      | ^^^^^ `handleGenerateSynthetic` is declared here
+  176 |
+  177 |   const handleImport = async (dataset: DatasetResult) => {
+  178 |     setIsGenerating(true); // Reuse loading state  react-hooks/immutability
+   76:7   error    Error: Cannot access variable before it is declared
+
+`searchDatasets` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/DatasetDiscovery.tsx:76:7
+  74 |       }, 100);
+  75 |     } else {
+> 76 |       searchDatasets();
+     |       ^^^^^^^^^^^^^^ `searchDatasets` accessed before it is declared
+  77 |     }
+  78 |   }, [defaultMode]);
+  79 |
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/DatasetDiscovery.tsx:80:3
+   78 |   }, [defaultMode]);
+   79 |
+>  80 |   const searchDatasets = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  81 |     setLoading(true);
+      | ^^^^^^^^^^^^^^^^^^^^^
+>  82 |     const phases = [
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^
+> 134 |     }
+      | ^^^^^^^^^^^^^^^^^^^^^
+> 135 |   };
+      | ^^^^^ `searchDatasets` is declared here
+  136 |
+  137 |   const toggleCompare = (idx: number) => {
+  138 |     setSelectedForCompare(prev => {                                                                                                                                                         react-hooks/immutability
+   78:6   warning  React Hook useEffect has missing dependencies: 'handleGenerateSynthetic' and 'searchDatasets'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          react-hooks/exhaustive-deps
+  295:51  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            react/no-unescaped-entities
+  295:72  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            react/no-unescaped-entities
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/HealthScoreCard.tsx
+  35:5  error    Error: Cannot access variable before it is declared
+
+`fetchHealthScore` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/HealthScoreCard.tsx:35:5
+  33 |
+  34 |   useEffect(() => {
+> 35 |     fetchHealthScore();
+     |     ^^^^^^^^^^^^^^^^ `fetchHealthScore` accessed before it is declared
+  36 |   }, [fileId]);
+  37 |
+  38 |   useEffect(() => {
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/HealthScoreCard.tsx:55:3
+  53 |   }, [data]);
+  54 |
+> 55 |   const fetchHealthScore = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 56 |     try {
+     | ^^^^^^^^^
+> 57 |       setLoading(true);
+     …
+     | ^^^^^^^^^
+> 71 |     }
+     | ^^^^^^^^^
+> 72 |   };
+     | ^^^^^ `fetchHealthScore` is declared here
+  73 |
+  74 |   const getScoreColor = (score: number) => {
+  75 |     if (score >= 80) return '#22C55E';  react-hooks/immutability
+  36:6  warning  React Hook useEffect has a missing dependency: 'fetchHealthScore'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ModelAdvisor.tsx
+  76:5  error    Error: Cannot access variable before it is declared
+
+`fetchRecommendations` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ModelAdvisor.tsx:76:5
+  74 |
+  75 |   useEffect(() => {
+> 76 |     fetchRecommendations();
+     |     ^^^^^^^^^^^^^^^^^^^^ `fetchRecommendations` accessed before it is declared
+  77 |   }, [fileId, taskTypeOverride]);
+  78 |
+  79 |   const fetchRecommendations = async () => {
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ModelAdvisor.tsx:79:3
+   77 |   }, [fileId, taskTypeOverride]);
+   78 |
+>  79 |   const fetchRecommendations = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  80 |     try {
+      | ^^^^^^^^^
+>  81 |       setLoading(true);
+      …
+      | ^^^^^^^^^
+> 112 |     }
+      | ^^^^^^^^^
+> 113 |   };
+      | ^^^^^ `fetchRecommendations` is declared here
+  114 |
+  115 |   const toggleModel = (key: string) => {
+  116 |     setSelectedModels(prev => {  react-hooks/immutability
+  77:6  warning  React Hook useEffect has a missing dependency: 'fetchRecommendations'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ModelSandbox.tsx
+  56:93   error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
+  56:102  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ModelTestingLab.tsx
+  151:19  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  154:21  warning  Image elements must have an alt prop, either with meaningful text, or an empty string for decorative images                                                                                                                                                                              jsx-a11y/alt-text
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ProjectWizard.tsx
+   42:5   error  Error: Cannot access variable before it is declared
+
+`fetchCategories` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ProjectWizard.tsx:42:5
+  40 |
+  41 |   useEffect(() => {
+> 42 |     fetchCategories();
+     |     ^^^^^^^^^^^^^^^ `fetchCategories` accessed before it is declared
+  43 |   }, []);
+  44 |
+  45 |   const fetchCategories = async () => {
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/ProjectWizard.tsx:45:3
+  43 |   }, []);
+  44 |
+> 45 |   const fetchCategories = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 46 |     try {
+     | ^^^^^^^^^
+> 47 |       const token = localStorage.getItem('neuralforge_token');
+     …
+     | ^^^^^^^^^
+> 70 |     }
+     | ^^^^^^^^^
+> 71 |   };
+     | ^^^^^ `fetchCategories` is declared here
+  72 |
+  73 |   const handleFinish = () => {
+  74 |     if (selectedCategory && hasDataset !== null && trainingApproach) {  react-hooks/immutability
+  117:46  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react/no-unescaped-entities
+  239:18  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react/no-unescaped-entities
+  239:37  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react/no-unescaped-entities
+  260:25  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react/no-unescaped-entities
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/TrainTogether.tsx
+  132:47  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/pipeline/TrainTogether.tsx:132:47
+  130 |   useEffect(() => {
+  131 |     if (!isTraining || currentEpoch >= DEMO_EPOCHS.length) {
+> 132 |       if (currentEpoch >= DEMO_EPOCHS.length) setIsTraining(false);
+      |                                               ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  133 |       return;
+  134 |     }
+  135 |  react-hooks/set-state-in-effect
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/workspace/AIDatasetFinder.tsx
+  137:128  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/workspace/AIDatasetFinder.tsx:137:128
+  135 |   useEffect(() => {
+  136 |     const p = problemStatement.toLowerCase();
+> 137 |     if (p.includes('predict') || p.includes('classify') || p.includes('detect') || p.includes('churn') || p.includes('fraud')) setTaskType('classification');
+      |                                                                                                                                ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  138 |     else if (p.includes('price') || p.includes('forecast') || p.includes('estimate') || p.includes('regression')) setTaskType('regression');
+  139 |     else if (p.includes('cluster') || p.includes('segment') || p.includes('group')) setTaskType('clustering');
+  140 |     else if (p.includes('text') || p.includes('nlp') || p.includes('sentiment') || p.includes('language')) setTaskType('nlp');  react-hooks/set-state-in-effect
+  194:6    warning  React Hook useEffect has missing dependencies: 'handleSearch' and 'problemStatement'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react-hooks/exhaustive-deps
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/workspace/DatasetMiniChat.tsx
+  96:14  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/Users/aaravkhanal/MULTILLM/NEURALFORGEAI.Guide/frontend/components/workspace/DatasetMiniChat.tsx:96:14
+  94 |       setMessages(prev => [...prev, { role: 'assistant', content: answer }]);
+  95 |       setIsTyping(false);
+> 96 |     }, 800 + Math.random() * 700);
+     |              ^^^^^^^^^^^^^ Cannot call impure function
+  97 |   };
+  98 |
+  99 |   return (  react-hooks/purity
+
+✖ 50 problems (37 errors, 13 warnings)
+

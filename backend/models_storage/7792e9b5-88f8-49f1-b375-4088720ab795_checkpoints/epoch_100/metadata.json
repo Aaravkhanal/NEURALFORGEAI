@@ -1,0 +1,13 @@
+{
+  "job_id": "7792e9b5-88f8-49f1-b375-4088720ab795",
+  "epoch": 100,
+  "model_format": "joblib",
+  "metrics": {
+    "mse": 1.1827,
+    "rmse": 1.0875,
+    "r2": 0.9967
+  },
+  "is_best": true,
+  "saved_at": "2026-06-25T07:47:28.682164+00:00",
+  "model_file": "./models_storage/7792e9b5-88f8-49f1-b375-4088720ab795_checkpoints/epoch_100/model.joblib"
+}

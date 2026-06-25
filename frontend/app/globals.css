@@ -1,0 +1,417 @@
+/* ============================================================
+   NEURALFORGE — Design System v3
+   Warm-white + Coral accent — matching reference screenshots
+   Space Mono headings · Inter body · Professional AutoML UI
+   ============================================================ */
+
+/* ── Fonts ─────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d6d0c4; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #b8b0a0; }
+
+/* ── Base ──────────────────────────────────────────────── */
+html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(255, 68, 0, 0.12); color: #1a1a1a; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #FDFBF7;
+  color: #1a1a1a;
+}
+
+/* ── Animations ────────────────────────────────────────── */
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
+.animate-slide-up { animation: slide-up 0.5s ease-out forwards; }
+.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+.animate-spin-slow { animation: spin-slow 1s linear infinite; }
+
+/* ── Monospace Heading Font ────────────────────────────── */
+.font-mono-heading {
+  font-family: 'Space Mono', 'Courier New', monospace;
+  font-weight: 700;
+}
+
+/* ── Stage Badge ───────────────────────────────────────── */
+.stage-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-radius: 4px;
+  background: #FF4400;
+  color: white;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Dashed Card (form sections in screenshots) ────────── */
+.dashed-card {
+  border: 1.5px dashed #e8ddd0;
+  border-radius: 12px;
+  background: #FEFCF9;
+  padding: 24px;
+  transition: border-color 0.2s ease;
+}
+.dashed-card:hover { border-color: #d4c8b8; }
+.dashed-card:focus-within { border-color: #FF4400; }
+
+/* ── Dashed card with peach/cream fill ─────────────────── */
+.dashed-card-filled {
+  border: 1.5px dashed #e8ddd0;
+  border-radius: 12px;
+  background: #FFF8F0;
+  padding: 32px;
+}
+
+/* ── Section Label (uppercase monospace) ────────────────── */
+.section-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #888;
+}
+
+/* ── Metric Card ───────────────────────────────────────── */
+.metric-card {
+  background: white;
+  border: 1px solid #f0ebe1;
+  border-radius: 12px;
+  padding: 20px 24px;
+  transition: all 0.2s ease;
+}
+.metric-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+
+/* ── Pipeline Step Circle ──────────────────────────────── */
+.step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.step-circle-inactive { background: #f0ebe1; color: #999; }
+.step-circle-active { background: #FF4400; color: white; }
+.step-circle-done { background: #FF4400; color: white; }
+
+/* ── Breadcrumb Dots ───────────────────────────────────── */
+.breadcrumb-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.breadcrumb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e8ddd0;
+  transition: all 0.3s ease;
+}
+.breadcrumb-dot-active {
+  width: 20px;
+  height: 8px;
+  border-radius: 99px;
+  background: #FF4400;
+}
+.breadcrumb-dot-done {
+  background: #FF4400;
+}
+
+/* ── Tag Pill ──────────────────────────────────────────── */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1px solid #e8ddd0;
+  background: white;
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tag-pill:hover { border-color: #FF4400; color: #FF4400; }
+.tag-pill-active { border-color: #FF4400; color: #FF4400; background: rgba(255,68,0,0.06); }
+
+/* ── Example Card ──────────────────────────────────────── */
+.example-card {
+  background: #FFF8F0;
+  border-radius: 12px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+.example-card:hover { border-color: #FF4400; background: #FFF4E8; }
+
+/* ── GPU Badge ─────────────────────────────────────────── */
+.gpu-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #16a34a;
+}
+
+/* ── Next Stage Navigation ─────────────────────────────── */
+.next-stage-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  border: 1px solid #e8ddd0;
+  background: white;
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.next-stage-btn:hover { border-color: #FF4400; color: #FF4400; }
+
+/* ── Primary Button ────────────────────────────────────── */
+.btn-coral {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 28px;
+  border-radius: 12px;
+  background: #FF4400;
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(255,68,0,0.2);
+}
+.btn-coral:hover { background: #E63E00; box-shadow: 0 4px 16px rgba(255,68,0,0.3); transform: translateY(-1px); }
+
+/* ── Ghost/Outline Button ──────────────────────────────── */
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  background: white;
+  color: #FF4400;
+  font-weight: 600;
+  font-size: 13px;
+  border: 1.5px solid #FF4400;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-outline:hover { background: rgba(255,68,0,0.05); }
+
+/* ── Tab Button ────────────────────────────────────────── */
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid #e8ddd0;
+  background: white;
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tab-btn:hover { border-color: #FF4400; color: #FF4400; }
+.tab-btn-active { border-color: #FF4400; color: #FF4400; background: rgba(255,68,0,0.05); }
+
+/* ── Type Badge ────────────────────────────────────────── */
+.type-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+.type-int { background: #EEF2FF; color: #4F46E5; }
+.type-float { background: #FEF3C7; color: #D97706; }
+.type-cat { background: #ECFDF5; color: #059669; }
+.type-bool { background: #FDF2F8; color: #DB2777; }
+
+/* ── Model Badge ───────────────────────────────────────── */
+.model-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.model-badge-best { background: #DCFCE7; color: #16A34A; }
+.model-badge-recommended { background: #FFF7ED; color: #EA580C; }
+.model-badge-fastest { background: #DBEAFE; color: #2563EB; }
+
+/* ── Code Block ────────────────────────────────────────── */
+.code-block {
+  background: #1a1a2e;
+  border-radius: 12px;
+  font-family: 'Space Mono', monospace;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #e2e8f0;
+}
+
+/* ── Landing Page Styles ───────────────────────────────── */
+.hero-gradient {
+  background: linear-gradient(180deg, #FDFBF7 0%, #FFF8F0 50%, #FDFBF7 100%);
+}
+
+/* ── Shadcn Theme Variables ────────────────────────────── */
+@theme inline {
+  --font-heading: 'Space Mono', monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+:root {
+  --background: #FDFBF7;
+  --foreground: #1a1a1a;
+  --card: #FFFFFF;
+  --card-foreground: #1a1a1a;
+  --popover: #FFFFFF;
+  --popover-foreground: #1a1a1a;
+  --primary: #FF4400;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F5F0E8;
+  --secondary-foreground: #555555;
+  --muted: #F5F0E8;
+  --muted-foreground: #888888;
+  --accent: #FFF8F0;
+  --accent-foreground: #FF4400;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border: #F0EBE1;
+  --input: #F0EBE1;
+  --ring: #FF4400;
+  --chart-1: #FF4400;
+  --chart-2: #10B981;
+  --chart-3: #3B82F6;
+  --chart-4: #F59E0B;
+  --chart-5: #8B5CF6;
+  --radius: 0.75rem;
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #1a1a1a;
+  --sidebar-primary: #FF4400;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFF8F0;
+  --sidebar-accent-foreground: #FF4400;
+  --sidebar-border: #F0EBE1;
+  --sidebar-ring: #FF4400;
+}
+
+.dark {
+  --background: #0f0f0f;
+  --foreground: #f5f5f5;
+  --card: #1a1a1a;
+  --card-foreground: #f5f5f5;
+  --popover: #1a1a1a;
+  --popover-foreground: #f5f5f5;
+  --primary: #FF6633;
+  --primary-foreground: #FFFFFF;
+  --secondary: #2a2a2a;
+  --secondary-foreground: #ccc;
+  --muted: #2a2a2a;
+  --muted-foreground: #888;
+  --accent: #2a2218;
+  --accent-foreground: #FF6633;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border: #333;
+  --input: #333;
+  --ring: #FF6633;
+  --chart-1: #FF6633;
+  --chart-2: #34D399;
+  --chart-3: #60A5FA;
+  --chart-4: #FBBF24;
+  --chart-5: #A78BFA;
+  --sidebar: #0f0f0f;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #FF6633;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #2a2218;
+  --sidebar-accent-foreground: #FF6633;
+  --sidebar-border: #333;
+  --sidebar-ring: #FF6633;
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; }
+}

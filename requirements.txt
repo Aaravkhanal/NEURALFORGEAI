@@ -1,0 +1,15 @@
+crewai 
+streamlit 
+pandas 
+langchain_community 
+langchain_groq
+matplotlib 
+numpy 
+pillow 
+bs4 
+arxiv
+fitz
+PyMuPDF
+SweetViz
+crewai==0.30.11
+crewai[tools]==0.30.11
