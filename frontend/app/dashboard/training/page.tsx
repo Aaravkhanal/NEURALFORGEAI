@@ -154,12 +154,11 @@ export default function TrainingPage() {
         if (!profile) return;
         const cols = profile.columns?.map((c: any) => c.name) ?? Object.keys(profile);
         setAvailableColumns(cols.filter(Boolean));
-        // Extract row count from wherever the API puts it
-        const rows = profile.total_rows
-          ?? profile.row_count
+        // Cleaning API returns row_count at the top level
+        const rows = profile.row_count
+          ?? profile.total_rows
           ?? profile.num_rows
           ?? profile.columns?.[0]?.total_rows
-          ?? profile.columns?.[0]?.count
           ?? 0;
         if (rows > 0) setProfileRowCount(Number(rows));
         // Auto-set override if targetColumn not in columns
