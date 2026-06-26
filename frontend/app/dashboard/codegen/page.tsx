@@ -105,19 +105,24 @@ export default function CodeGenPage() {
 
     const formatKey = modelFormat.split(' ')[0];
 
+    const token = typeof window !== 'undefined' ? localStorage.getItem('neuralforge_token') : null;
+
     try {
-      const res = await fetch('/api/generate-code', {
+      const res = await fetch('/api/backend/codegen/generate-llm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
         body: JSON.stringify({
-          problemDescription: problemDescription || problemContext?.domain || 'Machine learning prediction task',
-          modelFormat: formatKey,
-          modelName: selectedModel || modelMeta?.model_name || 'Trained Model',
-          taskType: problemContext?.task_type || modelMeta?.task_type || 'tabular_classification',
-          featureNames,
-          targetColumn: targetColumn || problemContext?.prediction_target || 'target',
-          trainingMetrics: modelMeta?.metrics || null,
-          preprocessingInfo: featureNames.length > 0
+          problem_description: problemDescription || problemContext?.domain || 'Machine learning prediction task',
+          model_format: formatKey,
+          model_name: selectedModel || modelMeta?.model_name || 'Trained Model',
+          task_type: problemContext?.task_type || modelMeta?.task_type || 'tabular_regression',
+          feature_names: featureNames,
+          target_column: targetColumn || problemContext?.prediction_target || 'target',
+          training_metrics: modelMeta?.metrics || null,
+          preprocessing_info: featureNames.length > 0
             ? `Features: [${featureNames.slice(0, 8).join(', ')}${featureNames.length > 8 ? ', ...' : ''}]`
             : null,
         }),
