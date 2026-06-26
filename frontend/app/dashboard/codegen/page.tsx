@@ -3,59 +3,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileCode2, Copy, Download, Check, Terminal,
-  Loader2, AlertCircle, BookOpen, FileText, Server,
+  Loader2, AlertCircle, BookOpen, FileText, Server, Database, FlaskConical,
 } from 'lucide-react';
 import { PipelineNav } from '@/components/PipelineNav';
 import { usePipeline } from '@/contexts/PipelineContext';
 
-// ── File metadata ────────────────────────────────────────────────
-const FILE_META: Record<string, {
-  icon: React.ReactNode;
-  label: string;
-  lang: string;
-  color: string;
-  description: string;
-}> = {
-  'inference.py': {
-    icon: <Terminal size={14} />,
-    label: 'inference.py',
-    lang: 'Python',
-    color: '#3B82F6',
-    description: 'Core inference script',
-  },
-  'app.py': {
-    icon: <Server size={14} />,
-    label: 'app.py',
-    lang: 'Python',
-    color: '#8B5CF6',
-    description: 'FastAPI REST server',
-  },
-  'requirements.txt': {
-    icon: <FileText size={14} />,
-    label: 'requirements.txt',
-    lang: 'Text',
-    color: '#10B981',
-    description: 'Python dependencies',
-  },
-  'README.md': {
-    icon: <BookOpen size={14} />,
-    label: 'README.md',
-    lang: 'Markdown',
-    color: '#F59E0B',
-    description: 'Setup & usage guide',
-  },
-};
-
-const FILE_ORDER = ['inference.py', 'app.py', 'requirements.txt', 'README.md'];
+// ── File icon/lang helpers ────────────────────────────────────────
+function getFileMeta(filename: string) {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const base = filename.toLowerCase();
+  if (base === 'readme.md') return { icon: <BookOpen size={13} />, lang: 'Markdown', color: '#F59E0B', description: 'Setup & usage guide' };
+  if (base === 'requirements.txt') return { icon: <FileText size={13} />, lang: 'Text', color: '#10B981', description: 'Python dependencies' };
+  if (base === 'app.py') return { icon: <Server size={13} />, lang: 'Python', color: '#8B5CF6', description: 'FastAPI REST server' };
+  if (base === 'inference.py') return { icon: <Terminal size={13} />, lang: 'Python', color: '#3B82F6', description: 'Inference script' };
+  if (base === 'train.py') return { icon: <FlaskConical size={13} />, lang: 'Python', color: '#FF4400', description: 'Training script' };
+  if (base === 'evaluate.py') return { icon: <FileCode2 size={13} />, lang: 'Python', color: '#EF4444', description: 'Evaluation script' };
+  if (base === 'data_loader.py') return { icon: <Database size={13} />, lang: 'Python', color: '#06B6D4', description: 'Data loading utilities' };
+  if (ext === 'py') return { icon: <FileCode2 size={13} />, lang: 'Python', color: '#888', description: 'Python script' };
+  return { icon: <FileText size={13} />, lang: 'Text', color: '#888', description: filename };
+}
 
 type GeneratedFiles = Record<string, string>;
-
-const PLACEHOLDER: GeneratedFiles = {
-  'inference.py': '# Generating inference script...',
-  'app.py': '# Generating FastAPI server...',
-  'requirements.txt': '# Generating dependencies...',
-  'README.md': '# Generating setup guide...',
-};
 
 // ── Component ────────────────────────────────────────────────────
 export default function CodeGenPage() {
@@ -74,7 +42,8 @@ export default function CodeGenPage() {
   const [modelFormat, setModelFormat] = useState('.pkl (Scikit-Learn)');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFiles>({});
-  const [selectedFile, setSelectedFile] = useState('inference.py');
+  const [fileOrder, setFileOrder] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -96,7 +65,8 @@ export default function CodeGenPage() {
   const generateCode = useCallback(async () => {
     setIsGenerating(true);
     setCodeError(null);
-    setGeneratedFiles(PLACEHOLDER);
+    setGeneratedFiles({});
+    setFileOrder([]);
 
     const featureNames: string[] =
       modelMeta?.features?.map((f: any) => f.name) ||
@@ -104,7 +74,6 @@ export default function CodeGenPage() {
       [];
 
     const formatKey = modelFormat.split(' ')[0];
-
     const token = typeof window !== 'undefined' ? localStorage.getItem('neuralforge_token') : null;
 
     try {
@@ -128,33 +97,34 @@ export default function CodeGenPage() {
         }),
       });
 
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Unknown error');
+        let detail = errText;
+        try { detail = JSON.parse(errText).detail || errText; } catch {}
+        throw new Error(detail.slice(0, 200));
+      }
+
       const data = await res.json();
 
-      if (data.files) {
+      if (data.files && Object.keys(data.files).length > 0) {
+        const order = Object.keys(data.files);
         setGeneratedFiles(data.files);
-      } else if (data.code) {
-        // Backwards compat if API returns old format
-        setGeneratedFiles({ ...PLACEHOLDER, 'inference.py': data.code });
+        setFileOrder(order);
+        setSelectedFile(order[0]);
       } else {
         throw new Error('No files returned from generation API');
       }
     } catch (e: any) {
       setCodeError('Code generation failed: ' + e.message);
-      setGeneratedFiles({
-        'inference.py': '# Generation error — see error message above.',
-        'app.py': '# Generation error.',
-        'requirements.txt': '',
-        'README.md': '',
-      });
     } finally {
       setIsGenerating(false);
     }
   }, [modelFormat, problemDescription, problemContext, selectedModel, modelMeta, datasetProfile, targetColumn]);
 
-  // Auto-generate: wait for model meta if we have a model ID, otherwise generate immediately
+  // Auto-generate once model meta is ready (or immediately if no trained model)
   useEffect(() => {
     if (hasGenerated.current) return;
-    if (trainedModelId && !modelMeta) return; // wait for meta to load
+    if (trainedModelId && !modelMeta) return;
     hasGenerated.current = true;
     generateCode();
   }, [modelMeta, trainedModelId, generateCode]);
@@ -185,10 +155,9 @@ export default function CodeGenPage() {
           return;
         }
       }
-      // Fallback: bundle generated files into a client-side ZIP-like download (just selected file)
+      // Fallback: download selected file
       const content = generatedFiles[selectedFile] || '';
-      const blob = new Blob([content], { type: 'text/plain' });
-      triggerDownload(blob, selectedFile);
+      triggerDownload(new Blob([content], { type: 'text/plain' }), selectedFile);
     } finally {
       setIsDownloading(false);
     }
@@ -196,12 +165,11 @@ export default function CodeGenPage() {
 
   const handleDownloadFile = (filename: string) => {
     const content = generatedFiles[filename] || '';
-    const blob = new Blob([content], { type: 'text/plain' });
-    triggerDownload(blob, filename);
+    triggerDownload(new Blob([content], { type: 'text/plain' }), filename);
   };
 
   const currentContent = generatedFiles[selectedFile] || '';
-  const selectedMeta = FILE_META[selectedFile];
+  const selectedMeta = selectedFile ? getFileMeta(selectedFile) : null;
   const featureCount = modelMeta?.features?.length || datasetProfile?.columns?.length || 0;
 
   return (
@@ -216,7 +184,7 @@ export default function CodeGenPage() {
               {isGenerating && <Loader2 size={22} className="animate-spin text-[#FF4400]" />}
             </h1>
             <p className="text-[14px] text-[#888]">
-              LLM-generated production package — 4 files tailored to your training context.
+              LLM-generated production package tailored to your training context.
             </p>
           </div>
           <div className="flex flex-col items-end gap-2 shrink-0">
@@ -248,11 +216,11 @@ export default function CodeGenPage() {
                 className="btn-coral min-w-[200px] flex justify-center items-center gap-2 disabled:opacity-60"
               >
                 {isDownloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                {isDownloading ? 'Packaging...' : trainedModelId ? 'Download Package (.zip)' : `Download ${selectedFile}`}
+                {isDownloading ? 'Packaging...' : trainedModelId ? 'Download Package (.zip)' : `Download ${selectedFile || 'File'}`}
               </button>
             </div>
             {trainedModelId && (
-              <p className="text-[10px] text-[#aaa]">ZIP: trained model + all 4 generated files</p>
+              <p className="text-[10px] text-[#aaa]">ZIP: trained model + all generated files</p>
             )}
           </div>
         </div>
@@ -260,7 +228,7 @@ export default function CodeGenPage() {
         {codeError && (
           <div className="mt-2 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
             <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
-            <p className="text-[11px] text-red-600 leading-snug line-clamp-2">{codeError}</p>
+            <p className="text-[11px] text-red-600 leading-snug">{codeError}</p>
           </div>
         )}
       </div>
@@ -269,55 +237,58 @@ export default function CodeGenPage() {
       <div className="flex-1 min-h-0 flex gap-5 overflow-hidden">
         {/* Left: file list + context */}
         <div className="w-[220px] shrink-0 flex flex-col">
-          {/* File List */}
-          <div className="dashed-card flex-1 min-h-0 p-4 flex flex-col overflow-y-auto">
-            <p className="section-label mb-3">FILES</p>
-            <div className="space-y-1.5 flex-1">
-              {FILE_ORDER.map((filename) => {
-                const meta = FILE_META[filename];
-                const isSelected = selectedFile === filename;
-                const hasContent = !!(generatedFiles[filename] && !generatedFiles[filename].startsWith('#'));
-                return (
-                  <button
-                    key={filename}
-                    onClick={() => setSelectedFile(filename)}
-                    className={`w-full text-left p-2.5 rounded-xl border transition-all duration-150 group ${
-                      isSelected
-                        ? 'bg-[#FFF8F0] border-[#FF4400]'
-                        : 'border-[#f0ebe1] hover:border-[#e0d5c9] hover:bg-[#fafaf8]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-0.5">
-                      <div
-                        className="flex items-center gap-1.5 text-[12px] font-bold"
-                        style={{
-                          fontFamily: "'Space Mono', monospace",
-                          color: isSelected ? meta.color : '#444',
-                        }}
-                      >
-                        <span style={{ color: isSelected ? meta.color : '#888' }}>{meta.icon}</span>
-                        {meta.label}
-                      </div>
-                      {isGenerating && isSelected ? (
-                        <Loader2 size={10} className="animate-spin text-[#FF4400]" />
-                      ) : hasContent ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                      ) : null}
-                    </div>
-                    <p className="text-[10px] text-[#888]">{meta.description}</p>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="dashed-card flex-1 min-h-0 p-4 flex flex-col overflow-hidden">
+            <p className="section-label mb-3 shrink-0">FILES</p>
 
-            {/* Training context summary */}
-            <div className="mt-4 pt-4 border-t border-[#f0ebe1]">
+            {isGenerating && fileOrder.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[#aaa]">
+                <Loader2 size={20} className="animate-spin text-[#FF4400]" />
+                <p className="text-[11px] text-center">Generating package…<br />~20 seconds</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0 pr-0.5">
+                {fileOrder.map((filename) => {
+                  const meta = getFileMeta(filename);
+                  const isSelected = selectedFile === filename;
+                  const hasContent = !!(generatedFiles[filename]);
+                  return (
+                    <button
+                      key={filename}
+                      onClick={() => setSelectedFile(filename)}
+                      className={`w-full text-left p-2.5 rounded-xl border transition-all duration-150 ${
+                        isSelected
+                          ? 'bg-[#FFF8F0] border-[#FF4400]'
+                          : 'border-[#f0ebe1] hover:border-[#e0d5c9] hover:bg-[#fafaf8]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div
+                          className="flex items-center gap-1.5 text-[12px] font-bold truncate"
+                          style={{ fontFamily: "'Space Mono', monospace", color: isSelected ? meta.color : '#444' }}
+                        >
+                          <span style={{ color: isSelected ? meta.color : '#888', flexShrink: 0 }}>{meta.icon}</span>
+                          <span className="truncate">{filename}</span>
+                        </div>
+                        {hasContent && <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 ml-1" />}
+                      </div>
+                      <p className="text-[10px] text-[#888] truncate">{meta.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Context summary */}
+            <div className="mt-3 pt-3 border-t border-[#f0ebe1] shrink-0">
               <p className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider mb-2">Context</p>
               <div className="space-y-1 text-[11px] text-[#666]">
                 <p><span className="font-bold text-[#444]">Model:</span>{' '}{selectedModel || modelMeta?.model_name || '—'}</p>
                 <p><span className="font-bold text-[#444]">Task:</span>{' '}{problemContext?.task_type || '—'}</p>
                 <p><span className="font-bold text-[#444]">Target:</span>{' '}{targetColumn || problemContext?.prediction_target || '—'}</p>
                 <p><span className="font-bold text-[#444]">Features:</span>{' '}{featureCount > 0 ? `${featureCount} cols` : '—'}</p>
+                {fileOrder.length > 0 && (
+                  <p><span className="font-bold text-[#444]">Files:</span>{' '}{fileOrder.length} generated</p>
+                )}
               </div>
             </div>
           </div>
@@ -328,23 +299,21 @@ export default function CodeGenPage() {
           {/* Editor top bar */}
           <div className="h-11 bg-[#252525] border-b border-[#333] flex items-center justify-between px-4 shrink-0">
             <div className="flex items-center gap-3">
-              {/* Dot decorations */}
               <div className="flex gap-1.5">
                 <span className="w-3 h-3 rounded-full bg-[#444]" />
                 <span className="w-3 h-3 rounded-full bg-[#444]" />
                 <span className="w-3 h-3 rounded-full bg-[#444]" />
               </div>
               <div className="flex items-center gap-2 ml-1">
-                <span style={{ color: selectedMeta?.color || '#888' }}>{selectedMeta?.icon}</span>
-                <span
-                  className="text-[13px] text-[#ccc]"
-                  style={{ fontFamily: "'Space Mono', monospace" }}
-                >
-                  {selectedFile}
+                {selectedMeta && <span style={{ color: selectedMeta.color }}>{selectedMeta.icon}</span>}
+                <span className="text-[13px] text-[#ccc]" style={{ fontFamily: "'Space Mono', monospace" }}>
+                  {selectedFile || 'No file selected'}
                 </span>
-                <span className="text-[10px] text-[#555] border border-[#333] rounded px-1.5 py-0.5">
-                  {selectedMeta?.lang}
-                </span>
+                {selectedMeta && (
+                  <span className="text-[10px] text-[#555] border border-[#333] rounded px-1.5 py-0.5">
+                    {selectedMeta.lang}
+                  </span>
+                )}
                 {isGenerating && (
                   <span className="text-[10px] text-[#FF4400] animate-pulse">generating...</span>
                 )}
@@ -352,8 +321,8 @@ export default function CodeGenPage() {
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => handleDownloadFile(selectedFile)}
-                disabled={isGenerating}
+                onClick={() => selectedFile && handleDownloadFile(selectedFile)}
+                disabled={isGenerating || !selectedFile}
                 className="flex items-center gap-1.5 text-[11px] text-[#666] hover:text-[#aaa] transition-colors disabled:opacity-40"
               >
                 <Download size={12} />
@@ -362,7 +331,8 @@ export default function CodeGenPage() {
               <div className="w-px h-4 bg-[#333]" />
               <button
                 onClick={handleCopy}
-                className="flex items-center gap-1.5 text-[11px] text-[#666] hover:text-[#aaa] transition-colors"
+                disabled={!selectedFile}
+                className="flex items-center gap-1.5 text-[11px] text-[#666] hover:text-[#aaa] transition-colors disabled:opacity-40"
               >
                 {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
                 {copied ? 'Copied!' : 'Copy'}
@@ -371,41 +341,53 @@ export default function CodeGenPage() {
           </div>
 
           {/* File tab strip */}
-          <div className="flex border-b border-[#2a2a2a] bg-[#1e1e1e] px-2 shrink-0 overflow-x-auto">
-            {FILE_ORDER.map((filename) => {
-              const meta = FILE_META[filename];
-              const isActive = selectedFile === filename;
-              return (
-                <button
-                  key={filename}
-                  onClick={() => setSelectedFile(filename)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-[11px] border-b-2 transition-all whitespace-nowrap ${
-                    isActive
-                      ? 'border-[#FF4400] text-white bg-[#1a1a1a]'
-                      : 'border-transparent text-[#666] hover:text-[#999]'
-                  }`}
-                  style={{ fontFamily: "'Space Mono', monospace" }}
-                >
-                  <span style={{ color: isActive ? meta.color : '#555' }}>{meta.icon}</span>
-                  {filename}
-                </button>
-              );
-            })}
-          </div>
+          {fileOrder.length > 0 && (
+            <div className="flex border-b border-[#2a2a2a] bg-[#1e1e1e] px-2 shrink-0 overflow-x-auto">
+              {fileOrder.map((filename) => {
+                const meta = getFileMeta(filename);
+                const isActive = selectedFile === filename;
+                return (
+                  <button
+                    key={filename}
+                    onClick={() => setSelectedFile(filename)}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-[11px] border-b-2 transition-all whitespace-nowrap ${
+                      isActive
+                        ? 'border-[#FF4400] text-white bg-[#1a1a1a]'
+                        : 'border-transparent text-[#666] hover:text-[#999]'
+                    }`}
+                    style={{ fontFamily: "'Space Mono', monospace" }}
+                  >
+                    <span style={{ color: isActive ? meta.color : '#555' }}>{meta.icon}</span>
+                    {filename}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Code content */}
           <div className="flex-1 overflow-auto p-5">
-            <pre
-              className="text-[12.5px] leading-[1.7] min-h-full"
-              style={{
-                fontFamily: "'Space Mono', monospace",
-                color: selectedFile === 'README.md' ? '#D4D4D4' : '#D4D4D4',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {currentContent || (isGenerating ? PLACEHOLDER[selectedFile] : '# Click Regenerate to generate files')}
-            </pre>
+            {isGenerating && !currentContent ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-[#555]">
+                <Loader2 size={28} className="animate-spin text-[#FF4400]" />
+                <p className="text-[13px]">Generating full ML package with NVIDIA LLM…</p>
+                <p className="text-[11px] text-[#444]">Training scripts, inference code, API server, README</p>
+              </div>
+            ) : (
+              <pre
+                className="text-[12.5px] leading-[1.7] min-h-full"
+                style={{
+                  fontFamily: "'Space Mono', monospace",
+                  color: '#D4D4D4',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {currentContent || (fileOrder.length === 0 && !isGenerating
+                  ? '# Click Regenerate to generate files'
+                  : '')}
+              </pre>
+            )}
           </div>
 
           {/* Status bar */}
@@ -414,12 +396,10 @@ export default function CodeGenPage() {
               <span className="text-[10px] text-[#444]">
                 {currentContent ? `${currentContent.split('\n').length} lines` : '—'}
               </span>
-              <span className="text-[10px] text-[#444]">{selectedMeta?.lang}</span>
+              <span className="text-[10px] text-[#444]">{selectedMeta?.lang || '—'}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${isGenerating ? 'bg-[#FF4400] animate-pulse' : 'bg-green-500'}`}
-              />
+              <span className={`w-1.5 h-1.5 rounded-full ${isGenerating ? 'bg-[#FF4400] animate-pulse' : 'bg-green-500'}`} />
               <span className="text-[10px] text-[#444]">
                 {isGenerating ? 'Generating...' : 'Ready'}
               </span>
