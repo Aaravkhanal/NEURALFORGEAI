@@ -159,74 +159,89 @@ async def generate_code_llm(
         "json": "xgb.Booster(); model.load_model(model_path)",
     }.get(fmt, "joblib.load(model_path)")
 
-    prompt = f"""You are a senior ML engineer generating a complete, production-ready Python inference package.
-
-PROJECT CONTEXT:
-- Problem: {request.problem_description}
-- Model: {request.model_name} ({request.model_format})
-- Task: {request.task_type}
-- Target column: {request.target_column}
-- {features_block}
-- {metrics_block}
-- Model loading: {loader}
-
-Generate EXACTLY these 4 files. Return ONLY a valid JSON object with no markdown fences, no explanations, no prose outside the JSON:
-
-{{
-  "inference.py": "<complete script>",
-  "app.py": "<complete FastAPI server>",
-  "requirements.txt": "<one package per line>",
-  "README.md": "<markdown guide>"
-}}
-
-FILE REQUIREMENTS:
-
-inference.py:
-- Header comment with exact pip packages needed
-- load_model(path) using {loader}
-- preprocess(data: dict) -> pd.DataFrame that casts and orders the exact features
-- predict(data: dict) -> dict with "prediction" and optionally "confidence"
-- Realistic sample_input using domain-appropriate values (not 0 or placeholder)
-- if __name__ == "__main__": block that runs sample_input and prints the result
-- Handle the actual task ({request.task_type}) correctly — regression returns float, classification returns label + probability
-
-app.py:
-- FastAPI with lifespan context to load model once at startup
-- POST /predict accepting a JSON body with the exact features, returning prediction + confidence
-- GET /health returning model name and status
-- CORS middleware enabled
-- Proper Pydantic request model with the exact feature names and correct types
-
-requirements.txt:
-- Exact packages for both files, pinned to working major versions
-- No comments, one package per line
-
-README.md:
-- ## Setup with exact pip install command
-- ## Run showing python inference.py and uvicorn app:app
-- ## API with a complete working curl example using realistic values
-- ## Features table with feature name and expected type for every feature"""
+    context = f"""Problem: {request.problem_description}
+Model: {request.model_name} ({request.model_format})
+Task: {request.task_type}
+Target column: {request.target_column}
+{features_block}
+{metrics_block}
+Model loading: {loader}"""
 
     try:
         llm = get_best_available_llm(temperature=0.05)
-        response = llm.invoke([
-            SystemMessage(content="You are an expert ML engineer. Output only valid JSON, no markdown, no extra text."),
-            HumanMessage(content=prompt),
-        ])
-        raw = response.content.strip()
-        # Strip any markdown fences the LLM might add
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        j_start = raw.find("{")
-        j_end = raw.rfind("}") + 1
-        if j_start != -1 and j_end > j_start:
-            raw = raw[j_start:j_end]
-        parsed = json.loads(raw)
+
+        def _gen(file_prompt: str) -> str:
+            from langchain_core.messages import HumanMessage, SystemMessage
+            r = llm.invoke([
+                SystemMessage(content="You are an expert ML engineer. Output ONLY the raw file content — no markdown fences, no explanation, no extra text."),
+                HumanMessage(content=file_prompt),
+            ])
+            content = r.content.strip()
+            # Strip any accidental markdown code fences
+            for fence in ("```python", "```text", "```markdown", "```"):
+                if content.startswith(fence):
+                    content = content[len(fence):].lstrip()
+            if content.endswith("```"):
+                content = content[:-3].rstrip()
+            return content.strip()
+
+        feat_list = ", ".join(request.feature_names) if request.feature_names else "feature1, feature2"
+        task = request.task_type
+
+        inference_py = _gen(f"""{context}
+
+Write a complete Python inference.py script:
+- Top comment: # Requires: <exact pip packages>
+- load_model(path) function using {loader}
+- preprocess(data: dict) -> pd.DataFrame: cast exact features to correct types, return in correct column order
+- predict(data: dict) -> dict: call load_model, preprocess, model.predict, return {{"prediction": value}}
+  {"- Also return confidence/probability if classification" if "classif" in task else ""}
+- sample_input dict with realistic domain values for features: {feat_list}
+- if __name__ == "__main__": run predict(sample_input), print result
+Write only the Python file. No markdown.""")
+
+        app_py = _gen(f"""{context}
+
+Write a complete FastAPI app.py:
+- Import FastAPI, CORSMiddleware, Pydantic BaseModel, pandas, and the model library
+- Pydantic Features model with fields: {feat_list} (correct types)
+- Load model once at startup (store in global)
+- POST /predict: accepts Features body, preprocesses, calls model.predict, returns {{"prediction": ..., "model": "{request.model_name}"}}
+- GET /health: returns {{"status": "ok", "model": "{request.model_name}"}}
+- CORS enabled for all origins
+Write only the Python file. No markdown.""")
+
+        requirements_txt = _gen(f"""{context}
+
+Write a requirements.txt for inference.py and app.py.
+One package per line. Pin major versions (e.g. fastapi>=0.110, pandas>=2.0).
+No comments. No extra text.""")
+
+        readme_md = _gen(f"""{context}
+Features: {feat_list}
+
+Write a concise README.md:
+## Setup
+pip install command
+
+## Run
+How to run inference.py and uvicorn
+
+## API
+Complete curl example for POST /predict with realistic values for each feature
+
+## Features
+Markdown table: Feature | Type for each feature ({feat_list})
+
+Write only the markdown file.""")
+
         files = {
-            "inference.py": parsed.get("inference.py", "# Generation failed").strip(),
-            "app.py": parsed.get("app.py", "# Generation failed").strip(),
-            "requirements.txt": parsed.get("requirements.txt", "").strip(),
-            "README.md": parsed.get("README.md", "").strip(),
+            "inference.py": inference_py,
+            "app.py": app_py,
+            "requirements.txt": requirements_txt,
+            "README.md": readme_md,
         }
+
     except Exception as e:
         logger.error(f"LLM code generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Code generation failed: {str(e)}")

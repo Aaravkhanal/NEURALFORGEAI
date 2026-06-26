@@ -205,10 +205,10 @@ export default function CodeGenPage() {
   const featureCount = modelMeta?.features?.length || datasetProfile?.columns?.length || 0;
 
   return (
-    <div className="animate-fade-in flex flex-col h-[calc(100vh-140px)]">
+    <div className="animate-fade-in flex flex-col" style={{ height: 'calc(100vh - 140px)' }}>
       {/* Header */}
-      <div className="shrink-0 mb-5">
-        <div className="stage-badge mb-4">STAGE 07</div>
+      <div className="shrink-0 mb-4">
+        <div className="stage-badge mb-3">STAGE 07</div>
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="font-mono-heading text-[32px] text-[#1a1a1a] mb-1 flex items-center gap-3">
@@ -258,19 +258,19 @@ export default function CodeGenPage() {
         </div>
 
         {codeError && (
-          <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-            <AlertCircle size={15} className="text-red-500 shrink-0 mt-0.5" />
-            <p className="text-[12px] text-red-600">{codeError}</p>
+          <div className="mt-2 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+            <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-red-600 leading-snug line-clamp-2">{codeError}</p>
           </div>
         )}
       </div>
 
       {/* Body */}
-      <div className="flex-1 min-h-0 flex gap-5">
+      <div className="flex-1 min-h-0 flex gap-5 overflow-hidden">
         {/* Left: file list + context */}
-        <div className="w-[240px] shrink-0 flex flex-col gap-4">
+        <div className="w-[220px] shrink-0 flex flex-col">
           {/* File List */}
-          <div className="dashed-card flex-1 p-4 flex flex-col">
+          <div className="dashed-card flex-1 min-h-0 p-4 flex flex-col overflow-y-auto">
             <p className="section-label mb-3">FILES</p>
             <div className="space-y-1.5 flex-1">
               {FILE_ORDER.map((filename) => {
@@ -428,12 +428,14 @@ export default function CodeGenPage() {
         </div>
       </div>
 
-      <PipelineNav
-        prevLink="/dashboard/training"
-        prevTitle="Model Training"
-        nextLink="/dashboard/deployment"
-        nextTitle="Deployment"
-      />
+      <div className="shrink-0 mt-3">
+        <PipelineNav
+          prevLink="/dashboard/training"
+          prevTitle="Model Training"
+          nextLink="/dashboard/deployment"
+          nextTitle="Deployment"
+        />
+      </div>
     </div>
   );
 }
