@@ -128,99 +128,100 @@ class LLMCodeGenRequest(BaseModel):
 
 
 @router.post("/generate-llm")
+
+@router.post("/generate-llm")
 async def generate_code_llm(
     request: LLMCodeGenRequest,
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
-    Generate production-ready inference code using the NVIDIA LLM API.
-    Returns 4 files: inference.py, app.py, requirements.txt, README.md
+    Generate production-ready ML package using NVIDIA LLM (fast 8b model).
+    Uses ===FILE: name=== delimiters to avoid JSON escaping issues.
     """
-    from services.llm_service import get_best_available_llm
+    import re as _re
+    from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, SystemMessage
+    from core.config import get_settings
+    _cfg = get_settings()
+
+    if not _cfg.nvidia_api_key:
+        raise HTTPException(status_code=503, detail="NVIDIA API key not configured")
 
     features_block = (
-        f"Exact feature names from training (use these verbatim): [{', '.join(request.feature_names)}]"
+        f"Features (use EXACTLY as-is): [{', '.join(request.feature_names)}]"
         if request.feature_names
-        else "Feature names not available — infer appropriate names from the problem description"
+        else "Features: not available, use generic names matching the problem"
     )
     metrics_block = (
-        f"Achieved training metrics: {json.dumps(request.training_metrics)}"
+        f"Training metrics: {json.dumps(request.training_metrics)}"
         if request.training_metrics else ""
     )
     fmt = request.model_format.lstrip(".")
     loader = {
-        "onnx": "onnxruntime.InferenceSession(model_path)",
-        "pt": "torch.load(model_path, weights_only=True)",
-        "pth": "torch.load(model_path, weights_only=True)",
-        "h5": "tf.keras.models.load_model(model_path)",
-        "keras": "tf.keras.models.load_model(model_path)",
-        "ubj": "xgb.Booster(); model.load_model(model_path)",
-        "json": "xgb.Booster(); model.load_model(model_path)",
-    }.get(fmt, "joblib.load(model_path)")
-
+        "onnx": "onnxruntime.InferenceSession",
+        "pt": "torch.load",
+        "pth": "torch.load",
+        "h5": "tf.keras.models.load_model",
+        "keras": "tf.keras.models.load_model",
+        "ubj": "xgb.Booster + load_model()",
+    }.get(fmt, "joblib.load")
 
     feat_list = ", ".join(request.feature_names) if request.feature_names else "feature1, feature2"
-    task = request.task_type
-    is_cls = "classif" in task.lower()
+    is_cls = "classif" in request.task_type.lower()
 
-    prompt = f"""You are a senior ML engineer. Generate a complete Python ML package for this project.
+    prompt = f"""Generate a production ML package. Separate files with ===FILE: filename=== on its own line.
 
-PROJECT CONTEXT:
-- Problem: {request.problem_description}
-- Model: {request.model_name} ({request.model_format})
-- Task type: {task}
-- Target column: {request.target_column}
-- {features_block}
-- {metrics_block}
-- Model loading: {loader}
+Context:
+Problem: {request.problem_description}
+Model: {request.model_name} ({request.model_format}), load with {loader}
+Task: {request.task_type}, target: {request.target_column}
+{features_block}
+{metrics_block}
 
-Determine the appropriate files for this project. Always include:
-data_loader.py, train.py, evaluate.py, inference.py, app.py, requirements.txt, README.md
+Generate these 5 files — complete, no placeholders, no TODO:
 
-Add extra files only if genuinely needed for complexity (e.g. preprocessing.py).
+===FILE: train.py===
+Full training script: load CSV, preprocess [{feat_list}], train {request.model_name}, save model.pkl, print {"accuracy/F1" if is_cls else "RMSE/R2"}.
 
-Separate each file with EXACTLY this marker on its own line:
-===FILE: <filename>===
+===FILE: inference.py===
+Functions: load_model(path), preprocess(data:dict)->DataFrame with exact features, predict(data:dict)->dict.
+Sample input with realistic domain values. if __name__=="__main__": run and print.
 
-Write ALL files completely. No placeholders, no "TODO", no ellipsis.
+===FILE: app.py===
+FastAPI: lifespan startup loads model once. POST /predict with Pydantic model [{feat_list}]. GET /health. CORS all origins.
 
-REQUIREMENTS PER FILE:
-- data_loader.py: load_data(csv_path) -> cleaned DataFrame, handle missing values, encode categoricals
-- train.py: full training script, reads CSV, trains {request.model_name}, saves model, prints metrics
-- evaluate.py: loads saved model, computes {"accuracy/precision/recall/F1/confusion matrix" if is_cls else "RMSE/MAE/R2"} on test set
-- inference.py: load_model({loader}), preprocess(data: dict)->DataFrame using features [{feat_list}], predict()->dict with prediction{"+ confidence" if is_cls else ""}, sample_input with realistic values, __main__ block
-- app.py: FastAPI lifespan startup, POST /predict with Pydantic model of [{feat_list}], GET /health, CORS
-- requirements.txt: one package per line, pinned major versions, no comments
-- README.md: Setup / Train / Evaluate / API sections with exact commands and working curl example
+===FILE: requirements.txt===
+One package per line, pinned major versions.
 
-Use real domain values — not 0 or placeholder."""
+===FILE: README.md===
+## Setup, ## Train, ## API (curl example with realistic feature values), ## Features table."""
 
     try:
-        from services.llm_service import get_best_available_llm
-        from langchain_core.messages import HumanMessage, SystemMessage
-        import re as _re
-
-        llm = get_best_available_llm(temperature=0.05)
+        llm = ChatOpenAI(
+            model="meta/llama-3.1-8b-instruct",
+            temperature=0.05,
+            max_tokens=3500,
+            api_key=_cfg.nvidia_api_key,
+            base_url="https://integrate.api.nvidia.com/v1",
+        )
         response = llm.invoke([
-            SystemMessage(content="Output ONLY file contents separated by ===FILE: name=== delimiters. No preamble or explanation."),
+            SystemMessage(content="Output ONLY file contents with ===FILE: name=== delimiters. No preamble."),
             HumanMessage(content=prompt),
         ])
         raw = response.content.strip()
 
-        # Parse ===FILE: name=== sections
         parts = _re.split(r'={3}FILE:\s*(.+?)\s*={3}', raw)
         files: dict = {}
         for i in range(1, len(parts), 2):
             fname = parts[i].strip()
             content = parts[i + 1].strip() if i + 1 < len(parts) else ""
-            content = _re.sub(r'^```[a-z]*\n?', '', content)
+            content = _re.sub(r'^```[a-zA-Z]*\n?', '', content)
             content = _re.sub(r'\n?```$', '', content).strip()
             if fname and content:
                 files[fname] = content
 
         if not files:
-            raise ValueError("LLM did not produce file sections. Response: " + raw[:300])
+            raise ValueError("LLM returned no file sections. Raw: " + raw[:300])
 
     except Exception as e:
         logger.error(f"LLM code generation failed: {e}")
